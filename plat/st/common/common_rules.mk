@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2023, STMicroelectronics - All Rights Reserved
+# Copyright (c) 2023-2024, STMicroelectronics - All Rights Reserved
 #
 # SPDX-License-Identifier: BSD-3-Clause
 #
@@ -20,6 +20,7 @@ check_boot_device:
 	    [ ${STM32MP_RAW_NAND} != 1 ] && \
 	    [ ${STM32MP_SPI_NAND} != 1 ] && \
 	    [ ${STM32MP_SPI_NOR} != 1 ] && \
+	    [ ${STM32MP_HYPERFLASH} != 1 ] && \
 	    [ ${STM32MP_UART_PROGRAMMER} != 1 ] && \
 	    [ ${STM32MP_USB_PROGRAMMER} != 1 ]; then \
 		echo "No boot device driver is enabled"; \
@@ -41,7 +42,7 @@ check_dtc_version:
 	fi
 
 # Create DTB file for BL2
-${BUILD_PLAT}/fdts/%-bl2.dts: fdts/%.dts fdts/${BL2_DTSI} | ${BUILD_PLAT} fdt_dirs
+${BUILD_PLAT}/fdts/%-bl2.dts: $(DT_SOURCE_PATH)/%.dts fdts/${BL2_DTSI} | ${BUILD_PLAT} fdt_dirs
 	@echo '#include "$(patsubst fdts/%,%,$<)"' > $@
 	@echo '#include "${BL2_DTSI}"' >> $@
 
@@ -81,3 +82,8 @@ tf-a-%.stm32: tf-a-%.bin ${STM32_DEPS}
 		-n ${STM32_HEADER_VERSION_MINOR} \
 		-b ${STM32_HEADER_BL2_BINARY_TYPE}
 	@echo
+
+ifeq (${PSA_FWU_SUPPORT},1)
+.PHONY: metadata
+metadata: ${BUILD_PLAT}/metadata.bin
+endif

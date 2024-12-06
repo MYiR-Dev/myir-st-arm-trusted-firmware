@@ -119,7 +119,11 @@ static bl_mem_params_node_t bl2_mem_params_descs[] = {
 				      VERSION_2, entry_point_info_t,
 				      NON_SECURE | EXECUTABLE),
 
+#if BL33_HYP
+		.ep_info.spsr = SPSR_MODE32(MODE32_hyp, SPSR_T_ARM,
+#else
 		.ep_info.spsr = SPSR_MODE32(MODE32_svc, SPSR_T_ARM,
+#endif
 					    SPSR_E_LITTLE,
 					    DISABLE_ALL_EXCEPTIONS),
 

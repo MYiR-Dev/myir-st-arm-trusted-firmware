@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019, STMicroelectronics - All Rights Reserved
+ * Copyright (c) 2018-2020, STMicroelectronics - All Rights Reserved
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -66,4 +66,17 @@ int stm32mp_reset_deassert(uint32_t id, unsigned int to_us)
 	}
 
 	return 0;
+}
+
+void __dead2 stm32mp_system_reset(void)
+{
+	uintptr_t rcc_base = stm32mp_rcc_base();
+
+	mmio_setbits_32(rcc_base + RCC_MP_GRSTCSETR,
+			RCC_MP_GRSTCSETR_MPSYSRST);
+
+	/* Loop in case system reset is not immediately caught */
+	for ( ; ; ) {
+		;
+	}
 }

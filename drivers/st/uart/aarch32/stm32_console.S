@@ -148,17 +148,15 @@ register_fail:
 	pop	{r4, pc}
 endfunc console_stm32_register
 
-	/* ---------------------------------------------------------------
+	/* --------------------------------------------------------
 	 * int console_core_putc(int c, uintptr_t base_addr)
-	 *
-	 * Function to output a character over the console. It returns the
-	 * character printed on success or -1 on error.
-	 *
+	 * Function to output a character over the console. It
+	 * returns the character printed on success or -1 on error.
 	 * In : r0 - character to be printed
 	 *      r1 - console base address
 	 * Out : return -1 on error else return character.
-	 * Clobber list : r2
-	 * ---------------------------------------------------------------
+	 * Clobber list : r2, r3
+	 * --------------------------------------------------------
 	 */
 func console_stm32_core_putc
 	/* Check the input parameter */
@@ -166,13 +164,19 @@ func console_stm32_core_putc
 	beq	putc_error
 
 	/* Check Transmit Data Register Empty */
+	mov	r3, #USART_TIMEOUT
 txe_loop:
+	subs	r3, r3, #1
+	beq	putc_error
 	ldr	r2, [r1, #USART_ISR]
 	tst	r2, #USART_ISR_TXE
 	beq	txe_loop
 	str	r0, [r1, #USART_TDR]
 	/* Check transmit complete flag */
+	mov	r3, #USART_TIMEOUT
 tc_loop:
+	subs	r3, r3, #1
+	beq	putc_error
 	ldr	r2, [r1, #USART_ISR]
 	tst	r2, #USART_ISR_TC
 	beq	tc_loop
@@ -226,7 +230,7 @@ endfunc console_stm32_core_getc
 	 *
 	 * In : r0 - console base address
 	 * Out : void.
-	 * Clobber list : r0, r1
+	 * Clobber list : r0, r1, r2
 	 * ---------------------------------------------------------------
 	 */
 func console_stm32_core_flush
@@ -239,7 +243,10 @@ func console_stm32_core_flush
 	tst	r1, #USART_CR1_UE
 	beq	1f
 	/* Check Transmit Data Register Empty */
+	mov	r2, #USART_TIMEOUT
 txe_loop_3:
+	subs	r2, r2, #1
+	beq	1f
 	ldr	r1, [r0, #USART_ISR]
 	tst	r1, #USART_ISR_TXE
 	beq	txe_loop_3

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, ARM Limited and Contributors. All rights reserved.
+ * Copyright (c) 2015-2024, ARM Limited and Contributors. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -7,6 +7,7 @@
 #include <assert.h>
 
 #include <drivers/clk.h>
+#include <drivers/st/nvmem.h>
 #include <drivers/st/stm32_gpio.h>
 #include <drivers/st/stm32_iwdg.h>
 #include <lib/mmio.h>
@@ -15,24 +16,6 @@
 
 #include <plat/common/platform.h>
 #include <platform_def.h>
-
-#if STM32MP13
-#define TAMP_BOOT_MODE_BACKUP_REG_ID	U(30)
-#endif
-#if STM32MP15
-#define TAMP_BOOT_MODE_BACKUP_REG_ID	U(20)
-#endif
-
-/*
- * Backup register to store fwu update information.
- * It should be writeable only by secure world, but also readable by non secure
- * (so it should be in Zone 2).
- */
-#define TAMP_BOOT_FWU_INFO_REG_ID	U(10)
-#define TAMP_BOOT_FWU_INFO_IDX_MSK	GENMASK(3, 0)
-#define TAMP_BOOT_FWU_INFO_IDX_OFF	U(0)
-#define TAMP_BOOT_FWU_INFO_CNT_MSK	GENMASK(7, 4)
-#define TAMP_BOOT_FWU_INFO_CNT_OFF	U(4)
 
 #if defined(IMAGE_BL2)
 #define MAP_SEC_SYSRAM	MAP_REGION_FLAT(STM32MP_SYSRAM_BASE, \
@@ -115,14 +98,14 @@ void configure_mmu(void)
 uintptr_t stm32_get_gpio_bank_base(unsigned int bank)
 {
 #if STM32MP13
-	assert((GPIO_BANK_A == 0) && (bank <= GPIO_BANK_I));
+	assert(bank <= GPIO_BANK_I);
 #endif
 #if STM32MP15
 	if (bank == GPIO_BANK_Z) {
 		return GPIOZ_BASE;
 	}
 
-	assert((GPIO_BANK_A == 0) && (bank <= GPIO_BANK_K));
+	assert(bank <= GPIO_BANK_K);
 #endif
 
 	return GPIOA_BASE + (bank * GPIO_BANK_OFFSET);
@@ -131,14 +114,14 @@ uintptr_t stm32_get_gpio_bank_base(unsigned int bank)
 uint32_t stm32_get_gpio_bank_offset(unsigned int bank)
 {
 #if STM32MP13
-	assert((GPIO_BANK_A == 0) && (bank <= GPIO_BANK_I));
+	assert(bank <= GPIO_BANK_I);
 #endif
 #if STM32MP15
 	if (bank == GPIO_BANK_Z) {
 		return 0;
 	}
 
-	assert((GPIO_BANK_A == 0) && (bank <= GPIO_BANK_K));
+	assert(bank <= GPIO_BANK_K);
 #endif
 
 	return bank * GPIO_BANK_OFFSET;
@@ -161,14 +144,14 @@ bool stm32_gpio_is_secure_at_reset(unsigned int bank)
 unsigned long stm32_get_gpio_bank_clock(unsigned int bank)
 {
 #if STM32MP13
-	assert((GPIO_BANK_A == 0) && (bank <= GPIO_BANK_I));
+	assert(bank <= GPIO_BANK_I);
 #endif
 #if STM32MP15
 	if (bank == GPIO_BANK_Z) {
 		return GPIOZ;
 	}
 
-	assert((GPIO_BANK_A == 0) && (bank <= GPIO_BANK_K));
+	assert(bank <= GPIO_BANK_K);
 #endif
 
 	return GPIOA + (bank - GPIO_BANK_A);
@@ -281,10 +264,15 @@ void stm32mp1_deconfigure_uart_pins(void)
 }
 #endif
 
+uintptr_t stm32_get_header_address(void)
+{
+	return STM32MP_HEADER_BASE;
+}
+
 uint32_t stm32mp_get_chip_version(void)
 {
 #if STM32MP13
-	return stm32mp1_syscfg_get_chip_version();
+	return stm32mp_syscfg_get_chip_version();
 #endif
 #if STM32MP15
 	uint32_t version = 0U;
@@ -301,7 +289,7 @@ uint32_t stm32mp_get_chip_version(void)
 uint32_t stm32mp_get_chip_dev_id(void)
 {
 #if STM32MP13
-	return stm32mp1_syscfg_get_chip_dev_id();
+	return stm32mp_syscfg_get_chip_dev_id();
 #endif
 #if STM32MP15
 	uint32_t dev_id;
@@ -468,11 +456,9 @@ void stm32mp_get_soc_name(char name[STM32_SOC_NAME_SIZE])
 	case STM32MP1_REV_B:
 		cpu_r = "B";
 		break;
-#if STM32MP13
 	case STM32MP1_REV_Y:
 		cpu_r = "Y";
 		break;
-#endif
 	case STM32MP1_REV_Z:
 		cpu_r = "Z";
 		break;
@@ -531,12 +517,12 @@ bool stm32mp_is_single_core(void)
 }
 
 /* Return true when device is in closed state */
-bool stm32mp_is_closed_device(void)
+uint32_t stm32mp_check_closed_device(void)
 {
 	uint32_t value;
 
 	if (stm32_get_otp_value(CFG0_OTP, &value) != 0) {
-		return true;
+		return STM32MP_CHIP_SEC_CLOSED;
 	}
 
 #if STM32MP13
@@ -544,17 +530,22 @@ bool stm32mp_is_closed_device(void)
 
 	switch (value) {
 	case CFG0_OPEN_DEVICE:
-		return false;
+		return STM32MP_CHIP_SEC_OPEN;
 	case CFG0_CLOSED_DEVICE:
 	case CFG0_CLOSED_DEVICE_NO_BOUNDARY_SCAN:
 	case CFG0_CLOSED_DEVICE_NO_JTAG:
-		return true;
+		return STM32MP_CHIP_SEC_CLOSED;
 	default:
 		panic();
 	}
 #endif
 #if STM32MP15
-	return (value & CFG0_CLOSED_DEVICE) == CFG0_CLOSED_DEVICE;
+	if ((value & CFG0_CLOSED_DEVICE) == CFG0_CLOSED_DEVICE) {
+		return STM32MP_CHIP_SEC_CLOSED;
+	} else {
+		return STM32MP_CHIP_SEC_OPEN;
+	}
+
 #endif
 }
 
@@ -614,99 +605,109 @@ uint32_t stm32_iwdg_get_otp_config(uint32_t iwdg_inst)
 		iwdg_cfg |= IWDG_HW_ENABLED;
 	}
 
-	if ((otp_value & BIT(iwdg_inst + HW2_OTP_IWDG_FZ_STOP_POS)) != 0U) {
-		iwdg_cfg |= IWDG_DISABLE_ON_STOP;
-	}
-
-	if ((otp_value & BIT(iwdg_inst + HW2_OTP_IWDG_FZ_STANDBY_POS)) != 0U) {
-		iwdg_cfg |= IWDG_DISABLE_ON_STANDBY;
-	}
-
 	return iwdg_cfg;
 }
 
-#if defined(IMAGE_BL2)
-uint32_t stm32_iwdg_shadow_update(uint32_t iwdg_inst, uint32_t flags)
+
+bool stm32mp1_addr_inside_backupsram(uintptr_t addr)
 {
-	uint32_t otp_value;
-	uint32_t otp;
-	uint32_t result;
-
-	if (stm32_get_otp_index(HW2_OTP, &otp, NULL) != 0) {
-		panic();
-	}
-
-	if (stm32_get_otp_value(HW2_OTP, &otp_value) != 0) {
-		panic();
-	}
-
-	if ((flags & IWDG_DISABLE_ON_STOP) != 0) {
-		otp_value |= BIT(iwdg_inst + HW2_OTP_IWDG_FZ_STOP_POS);
-	}
-
-	if ((flags & IWDG_DISABLE_ON_STANDBY) != 0) {
-		otp_value |= BIT(iwdg_inst + HW2_OTP_IWDG_FZ_STANDBY_POS);
-	}
-
-	result = bsec_write_otp(otp_value, otp);
-	if (result != BSEC_OK) {
-		return result;
-	}
-
-	/* Sticky lock OTP_IWDG (read and write) */
-	if ((bsec_set_sr_lock(otp) != BSEC_OK) ||
-	    (bsec_set_sw_lock(otp) != BSEC_OK)) {
-		return BSEC_LOCK_FAIL;
-	}
-
-	return BSEC_OK;
+	return (addr >= STM32MP_BACKUP_RAM_BASE) &&
+		(addr < (STM32MP_BACKUP_RAM_BASE + STM32MP_BACKUP_RAM_SIZE));
 }
+
+bool stm32mp_is_wakeup_from_standby(void)
+{
+#if STM32MP_UART_PROGRAMMER || STM32MP_USB_PROGRAMMER
+	return false;
+#else /* STM32MP_UART_PROGRAMMER || STM32MP_USB_PROGRAMMER */
+	uint32_t rstsr = mmio_read_32(stm32mp_rcc_base() + RCC_MP_RSTSCLRR);
+#if STM32MP15
+	uint32_t nsec_address;
+	struct nvmem_cell core1_branch_address = {};
 #endif
 
-uintptr_t stm32_get_bkpr_boot_mode_addr(void)
-{
-	return tamp_bkpr(TAMP_BOOT_MODE_BACKUP_REG_ID);
-}
-
-#if PSA_FWU_SUPPORT
-void stm32mp1_fwu_set_boot_idx(void)
-{
-	clk_enable(RTCAPB);
-	mmio_clrsetbits_32(tamp_bkpr(TAMP_BOOT_FWU_INFO_REG_ID),
-			   TAMP_BOOT_FWU_INFO_IDX_MSK,
-			   (plat_fwu_get_boot_idx() << TAMP_BOOT_FWU_INFO_IDX_OFF) &
-			   TAMP_BOOT_FWU_INFO_IDX_MSK);
-	clk_disable(RTCAPB);
-}
-
-uint32_t stm32_get_and_dec_fwu_trial_boot_cnt(void)
-{
-	uintptr_t bkpr_fwu_cnt = tamp_bkpr(TAMP_BOOT_FWU_INFO_REG_ID);
-	uint32_t try_cnt;
-
-	clk_enable(RTCAPB);
-	try_cnt = (mmio_read_32(bkpr_fwu_cnt) & TAMP_BOOT_FWU_INFO_CNT_MSK) >>
-		TAMP_BOOT_FWU_INFO_CNT_OFF;
-
-	assert(try_cnt <= FWU_MAX_TRIAL_REBOOT);
-
-	if (try_cnt != 0U) {
-		mmio_clrsetbits_32(bkpr_fwu_cnt, TAMP_BOOT_FWU_INFO_CNT_MSK,
-				   (try_cnt - 1U) << TAMP_BOOT_FWU_INFO_CNT_OFF);
+	if ((rstsr & RCC_MP_RSTSCLRR_PADRSTF) != 0U) {
+		return false;
 	}
-	clk_disable(RTCAPB);
 
-	return try_cnt;
+	if (stm32mp_get_boot_action() != BOOT_API_CTX_BOOT_ACTION_WAKEUP_STANDBY) {
+		return false;
+	}
+
+#if STM32MP15
+	stm32_get_core1_branch_address_cell(&core1_branch_address);
+	nvmem_cell_read(&core1_branch_address, (uint8_t *)&nsec_address,
+			sizeof(nsec_address), NULL);
+
+	if (nsec_address == 0U) {
+		return false;
+	}
+#endif
+
+	return stm32_pm_context_is_valid();
+#endif /* STM32MP_UART_PROGRAMMER || STM32MP_USB_PROGRAMMER */
 }
 
-void stm32_set_max_fwu_trial_boot_cnt(void)
+bool stm32mp_skip_boot_device_after_standby(void)
 {
-	uintptr_t bkpr_fwu_cnt = tamp_bkpr(TAMP_BOOT_FWU_INFO_REG_ID);
+#if STM32MP_UART_PROGRAMMER || STM32MP_USB_PROGRAMMER
+	return false;
+#else /* STM32MP_UART_PROGRAMMER || STM32MP_USB_PROGRAMMER */
+	static int skip = -1;
+
+	if (skip == -1) {
+		if (stm32mp_is_wakeup_from_standby()) {
+			skip = 1;
+#if STM32MP15
+			if (stm32_pm_get_optee_ep() == 0U) {
+				skip = 0;
+			}
+#endif
+		} else {
+			skip = 0;
+		}
+	}
+
+	return skip == 1;
+#endif /* STM32MP_UART_PROGRAMMER || STM32MP_USB_PROGRAMMER */
+}
+
+#if STM32MP13
+bool stm32mp_bkpram_get_access(void)
+{
+	static bool state = true;
+
+	if (!state) {
+		return state;
+	}
 
 	clk_enable(RTCAPB);
-	mmio_clrsetbits_32(bkpr_fwu_cnt, TAMP_BOOT_FWU_INFO_CNT_MSK,
-			   (FWU_MAX_TRIAL_REBOOT << TAMP_BOOT_FWU_INFO_CNT_OFF) &
-			   TAMP_BOOT_FWU_INFO_CNT_MSK);
+
+	if ((mmio_read_32(TAMP_BASE + TAMP_ERCFGR) != 0U) &&
+	    (mmio_read_32(TAMP_BASE + TAMP_SR) != 0U) &&
+	    (((mmio_read_32(TAMP_BASE + TAMP_CR2) & TAMP_CR2_MASK_NOER) == 0U) ||
+	     ((mmio_read_32(TAMP_BASE + TAMP_CR3) & TAMP_CR3_MASK_NOER) == 0U))) {
+		NOTICE("TAMPER detected : Degraded mode\n");
+		state = false;
+	}
+
 	clk_disable(RTCAPB);
+
+	return state;
 }
-#endif /* PSA_FWU_SUPPORT */
+#else /* STM32MP15 */
+bool stm32mp_bkpram_get_access(void)
+{
+	/* Remove erase signal before cleaning Backup SRAM */
+	uint32_t cr2_v = mmio_read_32(TAMP_BASE + TAMP_CR2);
+	uint32_t sr_v = mmio_read_32(TAMP_BASE + TAMP_SR);
+	uint32_t erase_flag = (sr_v & (TAMP_CR2_MASK_NOER | TAMP_SR_MASK_ITAMPx)) &
+			      (((~cr2_v) & TAMP_CR2_MASK_NOER) | TAMP_SR_MASK_ITAMPx);
+
+	if (erase_flag != 0U) {
+		mmio_write_32(TAMP_BASE + TAMP_SCR, erase_flag);
+	}
+
+	return true;
+}
+#endif

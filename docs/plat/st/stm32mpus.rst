@@ -4,7 +4,7 @@ STM32 MPUs
 STM32 MPUs are microprocessors designed by STMicroelectronics
 based on Arm Cortex-A. This page presents the common configuration of STM32
 MPUs, more details and dedicated configuration can be found in each STM32 MPU
-page (:ref:`STM32MP1` or :ref:`STM32MP2`)
+page (:ref:`STM32MP1` (`Github STM32MP1`_) or :ref:`STM32MP2` (`Github STM32MP2`_) )
 
 Design
 ------
@@ -39,6 +39,7 @@ Available storage medias are:
 - ``STM32MP_RAW_NAND``
 - ``STM32MP_SPI_NAND``
 - ``STM32MP_SPI_NOR``
+- ``STM32MP_HYPERFLASH``
 
 Serial boot devices:
 
@@ -72,6 +73,9 @@ It should contain at least those partitions:
 - fip (GUID 19d5df83-11b0-457b-be2c-7559c13142a5): which contains the FIP binary
 
 Usually, two copies of fsbl are used (fsbl1 and fsbl2) instead of one partition fsbl.
+
+.. _Github STM32MP1: https://github.com/STMicroelectronics/arm-trusted-firmware/tree/HEAD/docs/plat/st/stm32mp1.rst
+.. _Github STM32MP2: https://github.com/STMicroelectronics/arm-trusted-firmware/tree/HEAD/docs/plat/st/stm32mp2.rst
 
 --------------
 

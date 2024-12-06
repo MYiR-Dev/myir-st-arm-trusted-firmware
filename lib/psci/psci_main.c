@@ -181,6 +181,12 @@ int psci_system_suspend(uintptr_t entrypoint, u_register_t context_id)
 	int rc;
 	psci_power_state_t state_info;
 	entry_point_info_t ep;
+	unsigned int pwrlvl;
+#ifdef PLAT_MIN_SUSPEND_PWR_LVL
+	unsigned int min_pwrlvl = PLAT_MIN_SUSPEND_PWR_LVL;
+#else
+	unsigned int min_pwrlvl = PLAT_MAX_PWR_LVL;
+#endif
 
 	/* Check if the current CPU is the last ON CPU in the system */
 	if (!psci_is_last_on_cpu())
@@ -198,22 +204,24 @@ int psci_system_suspend(uintptr_t entrypoint, u_register_t context_id)
 	 * Check if platform allows suspend to Highest power level
 	 * (System level)
 	 */
-	if (psci_find_target_suspend_lvl(&state_info) < PLAT_MAX_PWR_LVL)
+	pwrlvl = psci_find_target_suspend_lvl(&state_info);
+	if (pwrlvl < min_pwrlvl)
 		return PSCI_E_DENIED;
 
 	/* Ensure that the psci_power_state makes sense */
 	assert(psci_validate_suspend_req(&state_info, PSTATE_TYPE_POWERDOWN)
 						== PSCI_E_SUCCESS);
+#ifndef PLAT_MIN_SUSPEND_PWR_LVL
 	assert(is_local_state_off(
 			state_info.pwr_domain_state[PLAT_MAX_PWR_LVL]) != 0);
-
+#endif
 	/*
 	 * Do what is needed to enter the system suspend state. This function
 	 * might return if the power down was abandoned for any reason, e.g.
 	 * arrival of an interrupt
 	 */
 	rc = psci_cpu_suspend_start(&ep,
-				    PLAT_MAX_PWR_LVL,
+				    pwrlvl,
 				    &state_info,
 				    PSTATE_TYPE_POWERDOWN);
 
@@ -223,7 +231,12 @@ int psci_system_suspend(uintptr_t entrypoint, u_register_t context_id)
 int psci_cpu_off(void)
 {
 	int rc;
+#if PSCI_OS_INIT_MODE
+	/* When coordination is done by OS, only update local state for CORE */
+	unsigned int target_pwrlvl = PSCI_CPU_PWR_LVL;
+#else
 	unsigned int target_pwrlvl = PLAT_MAX_PWR_LVL;
+#endif
 
 	/*
 	 * Do what is needed to power off this CPU and possible higher power

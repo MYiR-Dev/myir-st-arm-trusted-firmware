@@ -23,7 +23,7 @@ enum stm32mp_osc_id {
 extern const char *stm32mp_osc_node_label[NB_OSC];
 
 int stm32mp1_clk_probe(void);
-int stm32mp1_clk_init(void);
+int stm32mp1_clk_init(uint32_t pll1_freq_khz);
 
 bool stm32mp1_rcc_is_secure(void);
 bool stm32mp1_rcc_is_mckprot(void);
@@ -31,6 +31,8 @@ bool stm32mp1_rcc_is_mckprot(void);
 /* SMP protection on RCC registers access */
 void stm32mp1_clk_rcc_regs_lock(void);
 void stm32mp1_clk_rcc_regs_unlock(void);
+
+void stm32mp1_clk_mcuss_protect(bool enable);
 
 #ifdef STM32MP_SHARED_RESOURCES
 void stm32mp1_register_clock_parents_secure(unsigned long id);

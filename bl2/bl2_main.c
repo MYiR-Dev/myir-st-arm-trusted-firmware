@@ -99,7 +99,9 @@ void bl2_main(void)
 	bl2_arch_setup();
 
 #if PSA_FWU_SUPPORT
-	fwu_init();
+	if (plat_fwu_is_enabled()) {
+		fwu_init();
+	}
 #endif /* PSA_FWU_SUPPORT */
 
 	crypto_mod_init();

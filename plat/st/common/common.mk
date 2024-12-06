@@ -10,6 +10,11 @@ STM32MP_EARLY_CONSOLE		?=	0
 STM32MP_RECONFIGURE_CONSOLE	?=	0
 STM32MP_UART_BAUDRATE		?=	115200
 
+# Add specific ST version
+ST_VERSION 			:=	r1.0
+ST_GIT_SHA1			:=	$(shell git rev-parse --short=8 HEAD 2>/dev/null)
+VERSION_STRING			:=	v${VERSION_MAJOR}.${VERSION_MINOR}-${PLAT}-${ST_VERSION}(${BUILD_TYPE}):${BUILD_STRING}(${ST_GIT_SHA1})
+
 TRUSTED_BOARD_BOOT		?=	0
 STM32MP_USE_EXTERNAL_HEAP	?=	0
 
@@ -35,6 +40,7 @@ STM32MP_SDMMC			?=	0
 STM32MP_RAW_NAND		?=	0
 STM32MP_SPI_NAND		?=	0
 STM32MP_SPI_NOR			?=	0
+STM32MP_HYPERFLASH		?=	0
 
 # Put both BL2 and FIP in eMMC boot partition
 STM32MP_EMMC_BOOT		?=	0
@@ -43,6 +49,34 @@ STM32MP_EMMC_BOOT		?=	0
 STM32MP_UART_PROGRAMMER		?=	0
 STM32MP_USB_PROGRAMMER		?=	0
 
+ifneq ($(filter 1,${STM32MP_UART_PROGRAMMER} ${STM32MP_USB_PROGRAMMER}),)
+ifeq (${PSA_FWU_SUPPORT},1)
+$(info Disable PSA_FWU_SUPPORT flag for serial device)
+override PSA_FWU_SUPPORT	:=	0
+endif
+endif
+
+# Number of TF-A copies in the device
+STM32_TF_A_COPIES		:=	2
+
+# PLAT_PARTITION_MAX_ENTRIES must take care of STM32_TF-A_COPIES and other partitions
+PLAT_PARTITION_MAX_ENTRIES	:=	$(shell echo $$(($(STM32_TF_A_COPIES) + $(STM32_EXTRA_PARTS))))
+
+ifeq (${PSA_FWU_SUPPORT},1)
+# Number of banks of updatable firmware
+NR_OF_FW_BANKS			:=	2
+NR_OF_IMAGES_IN_FW_BANK		:=	1
+JSON_METADATA			?=	plat/st/common/default_metadata.json
+
+$(eval $(call GEN_METADATA,${JSON_METADATA},${BUILD_PLAT}/metadata.bin))
+
+FWU_MAX_PART = $(shell echo $$(($(STM32_TF_A_COPIES) + 2 + $(NR_OF_FW_BANKS))))
+ifeq ($(shell test $(FWU_MAX_PART) -gt $(PLAT_PARTITION_MAX_ENTRIES); echo $$?),0)
+$(error "Required partition number is $(FWU_MAX_PART) where PLAT_PARTITION_MAX_ENTRIES is only \
+$(PLAT_PARTITION_MAX_ENTRIES)")
+endif
+endif
+
 $(eval DTC_V = $(shell $(DTC) -v | awk '{print $$NF}'))
 $(eval DTC_VERSION = $(shell printf "%d" $(shell echo ${DTC_V} | cut -d- -f1 | sed "s/\./0/g" | grep -o "[0-9]*")))
 DTC_CPPFLAGS			+=	${INCLUDES}
@@ -50,6 +84,8 @@ DTC_FLAGS			+=	-Wno-unit_address_vs_reg
 ifeq ($(shell test $(DTC_VERSION) -ge 10601; echo $$?),0)
 DTC_FLAGS			+=	-Wno-interrupt_provider
 endif
+
+TFA_EXTERNAL_DT		?=	fdts/external-dt/tf-a
 
 # Macros and rules to build TF binary
 STM32_TF_ELF_LDFLAGS		:=	--hash-style=gnu --as-needed
@@ -85,6 +121,7 @@ $(eval $(call assert_booleans,\
 		STM32MP_EARLY_CONSOLE \
 		STM32MP_EMMC \
 		STM32MP_EMMC_BOOT \
+		STM32MP_HYPERFLASH \
 		STM32MP_RAW_NAND \
 		STM32MP_RECONFIGURE_CONSOLE \
 		STM32MP_SDMMC \
@@ -107,6 +144,7 @@ $(eval $(call add_defines,\
 		STM32MP_EARLY_CONSOLE \
 		STM32MP_EMMC \
 		STM32MP_EMMC_BOOT \
+		STM32MP_HYPERFLASH \
 		STM32MP_RAW_NAND \
 		STM32MP_RECONFIGURE_CONSOLE \
 		STM32MP_SDMMC \
@@ -123,6 +161,9 @@ PLAT_INCLUDES			+=	-Iplat/st/common/include/
 include lib/fconf/fconf.mk
 include lib/libfdt/libfdt.mk
 include lib/zlib/zlib.mk
+ifeq (${PSA_FWU_SUPPORT},1)
+include drivers/fwu/fwu.mk
+endif
 
 PLAT_BL_COMMON_SOURCES		+=	common/uuid.c					\
 					plat/st/common/stm32mp_common.c
@@ -137,9 +178,13 @@ PLAT_BL_COMMON_SOURCES		+=	drivers/clk/clk.c				\
 					drivers/st/clk/stm32mp_clkfunc.c		\
 					drivers/st/ddr/stm32mp_ddr.c			\
 					drivers/st/gpio/stm32_gpio.c			\
+					drivers/st/nvmem/nvmem.c			\
+					drivers/st/nvmem/stm32mp_tamp_nvram_core.c	\
 					drivers/st/regulator/regulator_core.c		\
 					drivers/st/regulator/regulator_fixed.c		\
-					plat/st/common/stm32mp_dt.c
+					drivers/st/regulator/regulator_gpio.c			\
+					plat/st/common/stm32mp_dt.c				\
+					plat/st/common/stm32mp_fconf_fuse.c
 
 BL2_SOURCES			+=	${FCONF_SOURCES} ${FCONF_DYN_SOURCES}
 BL2_SOURCES			+=	$(ZLIB_SOURCES)
@@ -232,6 +277,13 @@ ifneq (${STM32MP_FORCE_MTD_START_OFFSET},)
 $(eval $(call add_define_val,STM32MP_NAND_FIP_OFFSET,${STM32MP_FORCE_MTD_START_OFFSET}))
 endif
 BL2_SOURCES			+=	drivers/mtd/nand/core.c
+endif
+
+ifeq (${STM32MP_HYPERFLASH},1)
+ifneq (${STM32MP_FORCE_MTD_START_OFFSET},)
+$(eval $(call add_define_val,STM32MP_HYPERFLASH_FIP_OFFSET,${STM32MP_FORCE_MTD_START_OFFSET}))
+endif
+BL2_SOURCES			+=	drivers/mtd/hyperflash/hyperflash.c
 endif
 
 ifneq ($(filter 1,${STM32MP_UART_PROGRAMMER} ${STM32MP_USB_PROGRAMMER}),)

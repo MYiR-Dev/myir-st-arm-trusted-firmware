@@ -27,12 +27,12 @@ static io_block_spec_t gpt_block_spec = {
 };
 #endif
 
-#if (STM32MP_SDMMC || STM32MP_EMMC || STM32MP_SPI_NOR) && PSA_FWU_SUPPORT
+#if PSA_FWU_SUPPORT
 static io_block_spec_t metadata_block_spec = {
 	.offset = 0,    /* To be filled at runtime */
 	.length = 0,    /* To be filled at runtime */
 };
-#endif /* (STM32MP_SDMMC || STM32MP_EMMC || STM32MP_SPI_NOR) && PSA_FWU_SUPPORT */
+#endif
 
 /* By default, STM32 platforms load images from the FIP */
 struct plat_io_policy policies[MAX_NUMBER_IDS] = {
@@ -58,7 +58,7 @@ struct plat_io_policy policies[MAX_NUMBER_IDS] = {
 		.check = open_storage
 	},
 #endif
-#if (STM32MP_SDMMC || STM32MP_EMMC || STM32MP_SPI_NOR) && PSA_FWU_SUPPORT
+#if PSA_FWU_SUPPORT
 	[FWU_METADATA_IMAGE_ID] = {
 		.dev_handle = &storage_dev_handle,
 		.image_spec = (uintptr_t)&metadata_block_spec,
@@ -71,19 +71,37 @@ struct plat_io_policy policies[MAX_NUMBER_IDS] = {
 		.img_type_guid = NULL_GUID,
 		.check = open_storage
 	},
-#endif /* (STM32MP_SDMMC || STM32MP_EMMC || STM32MP_SPI_NOR) && PSA_FWU_SUPPORT */
+#endif /* PSA_FWU_SUPPORT */
 };
 
 #define DEFAULT_UUID_NUMBER	U(7)
 
+#ifdef __aarch64__
+#define BL31_UUID_NUMBER	U(2)
+#else
+#define BL31_UUID_NUMBER	U(0)
+#endif
+
 #if TRUSTED_BOARD_BOOT
+#ifdef __aarch64__
+#define TBBR_UUID_NUMBER	U(8)
+#else
 #define TBBR_UUID_NUMBER	U(6)
+#endif
 #else
 #define TBBR_UUID_NUMBER	U(0)
 #endif
 
+#if STM32MP_DDR_FIP_IO_STORAGE
+#define DDR_FW_UUID_NUMBER	U(1)
+#else
+#define DDR_FW_UUID_NUMBER	U(0)
+#endif
+
 #define FCONF_ST_IO_UUID_NUMBER	(DEFAULT_UUID_NUMBER + \
-				 TBBR_UUID_NUMBER)
+				 BL31_UUID_NUMBER + \
+				 TBBR_UUID_NUMBER + \
+				 DDR_FW_UUID_NUMBER)
 
 static io_uuid_spec_t fconf_stm32mp_uuids[FCONF_ST_IO_UUID_NUMBER];
 static OBJECT_POOL_ARRAY(fconf_stm32mp_uuids_pool, fconf_stm32mp_uuids);
@@ -95,7 +113,14 @@ struct policies_load_info {
 
 /* image id to property name table */
 static const struct policies_load_info load_info[FCONF_ST_IO_UUID_NUMBER] = {
+#if STM32MP_DDR_FIP_IO_STORAGE
+	{DDR_FW_ID, "ddr_fw_uuid"},
+#endif
 	{FW_CONFIG_ID, "fw_cfg_uuid"},
+#ifdef __aarch64__
+	{BL31_IMAGE_ID, "bl31_uuid"},
+	{SOC_FW_CONFIG_ID, "soc_fw_cfg_uuid"},
+#endif
 	{BL32_IMAGE_ID, "bl32_uuid"},
 	{BL32_EXTRA1_IMAGE_ID, "bl32_extra1_uuid"},
 	{BL32_EXTRA2_IMAGE_ID, "bl32_extra2_uuid"},
@@ -109,6 +134,10 @@ static const struct policies_load_info load_info[FCONF_ST_IO_UUID_NUMBER] = {
 	{NON_TRUSTED_FW_KEY_CERT_ID, "nt_fw_key_cert_uuid"},
 	{TRUSTED_OS_FW_CONTENT_CERT_ID, "tos_fw_content_cert_uuid"},
 	{NON_TRUSTED_FW_CONTENT_CERT_ID, "nt_fw_content_cert_uuid"},
+#ifdef __aarch64__
+	{SOC_FW_KEY_CERT_ID, "soc_fw_key_uuid"},
+	{SOC_FW_CONTENT_CERT_ID, "soc_fw_content_cert_uuid"},
+#endif
 #endif /* TRUSTED_BOARD_BOOT */
 };
 
@@ -160,6 +189,13 @@ int fconf_populate_stm32mp_io_policies(uintptr_t config)
 		uuid_ptr->uuid = uuid_helper.uuid_struct;
 		policies[load_info[i].image_id].image_spec = (uintptr_t)uuid_ptr;
 		switch (load_info[i].image_id) {
+#if ENCRYPT_BL31 && !defined(DECRYPTION_SUPPORT_none)
+		case BL31_IMAGE_ID:
+		case SOC_FW_CONFIG_ID:
+			policies[load_info[i].image_id].dev_handle = &enc_dev_handle;
+			policies[load_info[i].image_id].check = open_enc_fip;
+			break;
+#endif
 #if ENCRYPT_BL32 && !defined(DECRYPTION_SUPPORT_none)
 		case BL32_IMAGE_ID:
 		case BL32_EXTRA1_IMAGE_ID:

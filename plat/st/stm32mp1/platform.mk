@@ -1,8 +1,12 @@
 #
-# Copyright (c) 2015-2023, Arm Limited and Contributors. All rights reserved.
+# Copyright (c) 2015-2024, Arm Limited and Contributors. All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 #
+
+# Extra partitions used to find FIP, contains:
+# metadata (2) and the FIP partitions (default is 2).
+STM32_EXTRA_PARTS	:=	4
 
 include plat/st/common/common.mk
 
@@ -12,6 +16,8 @@ USE_COHERENT_MEM	:=	0
 
 # Default Device tree
 DTB_FILE_NAME		?=	stm32mp157c-ev1.dtb
+
+TF_CFLAGS 		+=	-DSTM32MP1X
 
 STM32MP13		?=	0
 STM32MP15		?=	0
@@ -33,6 +39,8 @@ STM32MP13		:=	0
 STM32MP15		:=	1
 endif
 
+STM32MP_STPMIC1L	?=	0
+
 ifeq ($(STM32MP13),1)
 # Will use SRAM2 as mbedtls heap
 STM32MP_USE_EXTERNAL_HEAP :=	1
@@ -50,6 +58,9 @@ endif
 # STM32 image header version v2.0
 STM32_HEADER_VERSION_MAJOR:=	2
 STM32_HEADER_VERSION_MINOR:=	0
+
+# OP-TEE cannot be in SYSRAM on STM32MP13
+override STM32MP1_OPTEE_IN_SYSRAM :=	0
 endif
 
 ifeq ($(STM32MP15),1)
@@ -60,12 +71,9 @@ STM32MP_DDR_32BIT_INTERFACE:=	1
 # STM32 image header version v1.0
 STM32_HEADER_VERSION_MAJOR:=	1
 STM32_HEADER_VERSION_MINOR:=	0
-
-# Add OP-TEE reserved shared memory area in mapping
-STM32MP15_OPTEE_RSV_SHM	:=	0
-$(eval $(call add_defines,STM32MP15_OPTEE_RSV_SHM))
-
 STM32MP_CRYPTO_ROM_LIB :=	1
+
+STM32MP1_OPTEE_IN_SYSRAM ?=	0
 
 # Decryption support
 ifneq ($(DECRYPTION_SUPPORT),none)
@@ -76,6 +84,9 @@ endif
 PKA_USE_NIST_P256	?=	0
 PKA_USE_BRAINPOOL_P256T1 ?=	0
 
+# STM32 Secure Secret Provisioning mode (SSP)
+STM32MP_SSP		?=	0
+
 ifeq ($(AARCH32_SP),sp_min)
 # Disable Neon support: sp_min runtime may conflict with non-secure world
 TF_CFLAGS		+=	-mfloat-abi=soft
@@ -85,35 +96,21 @@ endif
 WORKAROUND_CVE_2017_5715:=	0
 WORKAROUND_CVE_2022_23960:=	0
 
-# Number of TF-A copies in the device
-STM32_TF_A_COPIES		:=	2
-
-# PLAT_PARTITION_MAX_ENTRIES must take care of STM32_TF-A_COPIES and other partitions
-# such as metadata (2) to find all the FIP partitions (default is 2).
-PLAT_PARTITION_MAX_ENTRIES	:=	$(shell echo $$(($(STM32_TF_A_COPIES) + 4)))
-
-ifeq (${PSA_FWU_SUPPORT},1)
-# Number of banks of updatable firmware
-NR_OF_FW_BANKS			:=	2
-NR_OF_IMAGES_IN_FW_BANK		:=	1
-
-FWU_MAX_PART = $(shell echo $$(($(STM32_TF_A_COPIES) + 2 + $(NR_OF_FW_BANKS))))
-ifeq ($(shell test $(FWU_MAX_PART) -gt $(PLAT_PARTITION_MAX_ENTRIES); echo $$?),0)
-$(error "Required partition number is $(FWU_MAX_PART) where PLAT_PARTITION_MAX_ENTRIES is only \
-$(PLAT_PARTITION_MAX_ENTRIES)")
-endif
-endif
-
 ifeq ($(STM32MP13),1)
 STM32_HASH_VER		:=	4
 STM32_RNG_VER		:=	4
+STM32_SAES_VER		:=	48 # 0x30
 else # Assuming STM32MP15
 STM32_HASH_VER		:=	2
 STM32_RNG_VER		:=	2
+STM32_SAES_VER		:=	0 # Unavailable in this platform
 endif
 
 # Download load address for serial boot devices
 DWL_BUFFER_BASE 	?=	0xC7000000
+
+# Hypervisor mode
+BL33_HYP			?= 0
 
 # Device tree
 ifeq ($(STM32MP13),1)
@@ -125,6 +122,16 @@ FDT_SOURCES		:=	$(addprefix ${BUILD_PLAT}/fdts/, $(patsubst %.dtb,%-bl2.dts,$(DT
 ifeq ($(AARCH32_SP),sp_min)
 BL32_DTSI		:=	stm32mp15-bl32.dtsi
 FDT_SOURCES		+=	$(addprefix ${BUILD_PLAT}/fdts/, $(patsubst %.dtb,%-bl32.dts,$(DTB_FILE_NAME)))
+endif
+endif
+
+ifneq (,$(wildcard fdts/$(patsubst %.dtb,%.dts,$(DTB_FILE_NAME))))
+DT_SOURCE_PATH		:=	fdts
+else
+ifneq (,$(wildcard $(TFA_EXTERNAL_DT)/$(patsubst %.dtb,%.dts,$(DTB_FILE_NAME))))
+DT_SOURCE_PATH		:=	$(TFA_EXTERNAL_DT)
+else
+$(error Cannot find $(patsubst %.dtb,%.dts,$(DTB_FILE_NAME)) file)
 endif
 endif
 
@@ -142,7 +149,7 @@ endif
 STM32MP_FW_CONFIG_NAME	:=	$(patsubst %.dtb,%-fw-config.dtb,$(DTB_FILE_NAME))
 STM32MP_FW_CONFIG	:=	${BUILD_PLAT}/fdts/$(STM32MP_FW_CONFIG_NAME)
 ifneq (${AARCH32_SP},none)
-FDT_SOURCES		+=	$(addprefix fdts/, $(patsubst %.dtb,%.dts,$(STM32MP_FW_CONFIG_NAME)))
+FDT_SOURCES		+=	$(addprefix $(DT_SOURCE_PATH)/, $(patsubst %.dtb,%.dts,$(STM32MP_FW_CONFIG_NAME)))
 endif
 # Add the FW_CONFIG to FIP and specify the same to certtool
 $(eval $(call TOOL_ADD_PAYLOAD,${STM32MP_FW_CONFIG},--fw-config))
@@ -159,14 +166,18 @@ endif
 # Enable flags for C files
 $(eval $(call assert_booleans,\
 	$(sort \
+		BL33_HYP \
 		PKA_USE_BRAINPOOL_P256T1 \
 		PKA_USE_NIST_P256 \
 		STM32MP_CRYPTO_ROM_LIB \
 		STM32MP_DDR_32BIT_INTERFACE \
 		STM32MP_DDR_DUAL_AXI_PORT \
+		STM32MP_SSP \
+		STM32MP_STPMIC1L \
 		STM32MP_USE_EXTERNAL_HEAP \
 		STM32MP13 \
 		STM32MP15 \
+		STM32MP1_OPTEE_IN_SYSRAM \
 )))
 
 $(eval $(call assert_numerics,\
@@ -175,11 +186,13 @@ $(eval $(call assert_numerics,\
 		STM32_HASH_VER \
 		STM32_HEADER_VERSION_MAJOR \
 		STM32_RNG_VER \
+		STM32_SAES_VER \
 		STM32_TF_A_COPIES \
 )))
 
 $(eval $(call add_defines,\
 	$(sort \
+		BL33_HYP \
 		DWL_BUFFER_BASE \
 		PKA_USE_BRAINPOOL_P256T1 \
 		PKA_USE_NIST_P256 \
@@ -188,13 +201,17 @@ $(eval $(call add_defines,\
 		STM32_HASH_VER \
 		STM32_HEADER_VERSION_MAJOR \
 		STM32_RNG_VER \
+		STM32_SAES_VER \
 		STM32_TF_A_COPIES \
 		STM32MP_CRYPTO_ROM_LIB \
 		STM32MP_DDR_32BIT_INTERFACE \
 		STM32MP_DDR_DUAL_AXI_PORT \
+		STM32MP_SSP \
+		STM32MP_STPMIC1L \
 		STM32MP_USE_EXTERNAL_HEAP \
 		STM32MP13 \
 		STM32MP15 \
+		STM32MP1_OPTEE_IN_SYSRAM \
 )))
 
 # Include paths and source files
@@ -215,12 +232,21 @@ PLAT_BL_COMMON_SOURCES	+=	drivers/arm/tzc/tzc400.c				\
 				drivers/st/ddr/stm32mp1_ddr_helpers.c			\
 				drivers/st/i2c/stm32_i2c.c				\
 				drivers/st/iwdg/stm32_iwdg.c				\
-				drivers/st/pmic/stm32mp_pmic.c				\
-				drivers/st/pmic/stpmic1.c				\
 				drivers/st/reset/stm32mp1_reset.c			\
+				plat/st/stm32mp1/stm32mp1_context.c			\
 				plat/st/stm32mp1/stm32mp1_dbgmcu.c			\
 				plat/st/stm32mp1/stm32mp1_helper.S			\
 				plat/st/stm32mp1/stm32mp1_syscfg.c
+
+ifeq ($(STM32MP_STPMIC1L),1)
+PLAT_BL_COMMON_SOURCES	+=	drivers/st/pmic/stm32mp_pmic2.c				\
+				drivers/st/pmic/stpmic2.c
+else
+PLAT_BL_COMMON_SOURCES	+=	drivers/st/pmic/stm32mp_pmic.c				\
+				drivers/st/pmic/stpmic1.c
+endif
+
+PLAT_BL_COMMON_SOURCES  +=	drivers/st/nvmem/stm32mp_tamp_nvram_mp1.c
 
 ifeq ($(STM32MP13),1)
 PLAT_BL_COMMON_SOURCES	+=	drivers/st/clk/clk-stm32-core.c				\
@@ -233,12 +259,12 @@ endif
 BL2_SOURCES		+=	plat/st/stm32mp1/plat_bl2_mem_params_desc.c		\
 				plat/st/stm32mp1/stm32mp1_fconf_firewall.c
 
-ifeq (${PSA_FWU_SUPPORT},1)
-include drivers/fwu/fwu.mk
-endif
-
 BL2_SOURCES		+=	drivers/st/crypto/stm32_hash.c				\
 				plat/st/stm32mp1/bl2_plat_setup.c
+
+ifeq ($(STM32MP13),1)
+BL2_SOURCES		+=	drivers/st/mce/stm32_mce.c
+endif
 
 ifeq (${TRUSTED_BOARD_BOOT},1)
 ifeq ($(STM32MP13),1)
@@ -277,9 +303,18 @@ endif
 BL2_SOURCES		+=	drivers/st/ddr/stm32mp1_ddr.c				\
 				drivers/st/ddr/stm32mp1_ram.c
 
+BL2_SOURCES		+=	plat/st/stm32mp1/plat_ddr.c
+
+BL2_SOURCES		+=	plat/st/stm32mp1/stm32mp1_critic_power.c
+BL2_SOURCES		+=	plat/st/stm32mp1/stm32mp1_critic_power_wrapper.S
+
+ifeq ($(STM32MP_SSP),1)
+include plat/st/stm32mp1/stm32mp1_ssp.mk
+endif
+
 ifeq ($(AARCH32_SP),sp_min)
 # Create DTB file for BL32
-${BUILD_PLAT}/fdts/%-bl32.dts: fdts/%.dts fdts/${BL32_DTSI} | ${BUILD_PLAT} fdt_dirs
+${BUILD_PLAT}/fdts/%-bl32.dts: $(DT_SOURCE_PATH)/%.dts fdts/${BL32_DTSI} | ${BUILD_PLAT} fdt_dirs
 	@echo '#include "$(patsubst fdts/%,%,$<)"' > $@
 	@echo '#include "${BL32_DTSI}"' >> $@
 

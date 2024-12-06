@@ -21,7 +21,6 @@
 
 struct fixed_data {
 	char name[FIXED_NAME_LEN];
-	uint16_t volt;
 	struct regul_description desc;
 };
 

@@ -179,9 +179,9 @@ static bool psci_is_last_cpu_to_idle_at_pwrlvl(unsigned int end_pwrlvl)
 	}
 
 	my_idx = plat_my_core_pos();
-
-	for (lvl = PSCI_CPU_PWR_LVL; lvl <= end_pwrlvl; lvl++) {
-		parent_idx = psci_cpu_pd_nodes[my_idx].parent_node;
+	parent_idx = psci_cpu_pd_nodes[my_idx].parent_node;
+	for (lvl = PSCI_CPU_PWR_LVL + U(1); lvl < end_pwrlvl; lvl++) {
+		parent_idx = psci_non_cpu_pd_nodes[parent_idx].parent_node;
 	}
 
 	cpu_start_idx = psci_non_cpu_pd_nodes[parent_idx].cpu_start_idx;
@@ -345,11 +345,8 @@ void psci_update_req_local_pwr_states(unsigned int end_pwrlvl,
 		prev[lvl - 1U] = *psci_get_req_local_pwr_states(lvl, cpu_idx);
 
 		/* Update the new requested local power state */
-		if (lvl <= end_pwrlvl) {
-			req_state = state_info->pwr_domain_state[lvl];
-		} else {
-			req_state = state_info->pwr_domain_state[end_pwrlvl];
-		}
+		req_state = state_info->pwr_domain_state[lvl];
+
 		psci_set_req_local_pwr_state(lvl, cpu_idx, req_state);
 	}
 }
@@ -662,6 +659,8 @@ int psci_validate_state_coordination(unsigned int end_pwrlvl,
 			}
 			goto exit;
 		}
+
+		parent_idx = psci_non_cpu_pd_nodes[parent_idx].parent_node;
 	}
 
 	/*

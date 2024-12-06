@@ -182,6 +182,9 @@ void sp_min_platform_setup(void)
 
 	stm32mp_gic_init();
 
+	/* Disable MCU subsystem protection */
+	stm32mp1_clk_mcuss_protect(false);
+
 	if (stm32_iwdg_init() < 0) {
 		panic();
 	}

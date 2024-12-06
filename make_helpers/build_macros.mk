@@ -163,6 +163,16 @@ $(2): $(1) enctool
 	$$(Q)$$(ENCTOOL) $$(ENC_ARGS) -i $$< -o $$@
 endef
 
+# GEN_METADATA
+define GEN_METADATA
+$(dir $(2)):
+	$$(Q)mkdir -p $$(dir $(2))
+
+$(2): $(1) | $(dir $(2))
+	$$(ECHO) "  GEN_METADATA     $$<"
+	$$(Q)$$(FWUMDTOOL) $$(FWUMD_ARGS) jsonparse $$< -b $$@
+endef
+
 # TOOL_ADD_PAYLOAD appends the command line arguments required by fiptool to
 # package a new payload and/or by cert_create to generate certificate.
 # Optionally, it adds the dependency on this payload

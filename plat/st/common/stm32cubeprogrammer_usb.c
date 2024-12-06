@@ -21,6 +21,10 @@ struct dfu_state {
 	uintptr_t base;
 	size_t len;
 	uintptr_t address;
+#if STM32MP_SSP
+	uintptr_t cert_base;
+	size_t cert_len;
+#endif
 	/* working buffer */
 	uint8_t buffer[UCHAR_MAX];
 };
@@ -43,6 +47,7 @@ static struct dfu_state dfu_state;
 		} \
 	}
 
+#if !STM32MP_SSP
 static bool is_valid_header(fip_toc_header_t *header)
 {
 	if ((header->name == TOC_HEADER_NAME) && (header->serial_number != 0U)) {
@@ -51,6 +56,7 @@ static bool is_valid_header(fip_toc_header_t *header)
 
 	return false;
 }
+#endif
 
 static int dfu_callback_upload(uint8_t alt, uintptr_t *buffer, uint32_t *len,
 			       void *user_data)
@@ -62,7 +68,15 @@ static int dfu_callback_upload(uint8_t alt, uintptr_t *buffer, uint32_t *len,
 	switch (usb_dfu_get_phase(alt)) {
 	case PHASE_CMD:
 		/* Get Pḧase */
+#if STM32MP_SSP && STM32MP15
+		if (dfu->phase == PHASE_SSP) {
+			dfu->buffer[0] = PHASE_FLASHLAYOUT;
+		} else {
+			dfu->buffer[0] = dfu->phase;
+		}
+#else
 		dfu->buffer[0] = dfu->phase;
+#endif
 		dfu->buffer[1] = (uint8_t)(dfu->address);
 		dfu->buffer[2] = (uint8_t)(dfu->address >> 8);
 		dfu->buffer[3] = (uint8_t)(dfu->address >> 16);
@@ -85,6 +99,33 @@ static int dfu_callback_upload(uint8_t alt, uintptr_t *buffer, uint32_t *len,
 		}
 		break;
 
+#if STM32MP_SSP
+	case PHASE_SSP:
+#if STM32MP13
+		dfu->buffer[0] = dfu->phase;
+#endif
+#if STM32MP15
+		/* Fix phase to flashlayout phase */
+		dfu->buffer[0] = PHASE_FLASHLAYOUT;
+#endif
+		dfu->buffer[1] = (uint8_t)(dfu_state.cert_base);
+		dfu->buffer[2] = (uint8_t)(dfu_state.cert_base >> 8);
+		dfu->buffer[3] = (uint8_t)(dfu_state.cert_base >> 16);
+		dfu->buffer[4] = (uint8_t)(dfu_state.cert_base >> 24);
+		dfu->buffer[5] = 0x00;
+		dfu->buffer[6] = 0x00;
+		dfu->buffer[7] = 0x00;
+		dfu->buffer[8] = 0x00;
+		length = 9U;
+
+		if ((length + dfu_state.cert_len) <= sizeof(dfu->buffer)) {
+			memcpy(&dfu->buffer[9], (uint8_t *)dfu_state.cert_base,
+			       dfu_state.cert_len);
+			length += dfu_state.cert_len;
+		}
+
+		break;
+#endif
 	default:
 		DFU_ERROR("phase ID :%i, alternate %i for phase %i\n",
 			  dfu->phase, alt, usb_dfu_get_phase(alt));
@@ -137,6 +178,15 @@ static int dfu_callback_manifestation(uint8_t alt, void *user_data)
 	     dfu->phase, alt, dfu->address);
 
 	switch (dfu->phase) {
+#if STM32MP_SSP
+	case PHASE_SSP:
+		/* Configure End with request detach */
+		dfu->phase = PHASE_FLASHLAYOUT;
+		dfu->address = UNDEFINED_DOWN_ADDR;
+		dfu->len = 0;
+		break;
+#else
+	case PHASE_DDR_FW:
 	case PHASE_SSBL:
 		if (!is_valid_header((fip_toc_header_t *)dfu->base)) {
 			DFU_ERROR("FIP Header check failed for phase %d\n", alt);
@@ -149,6 +199,7 @@ static int dfu_callback_manifestation(uint8_t alt, void *user_data)
 		dfu->address = UNDEFINED_DOWN_ADDR;
 		dfu->len = 0;
 		break;
+#endif /* STM32MP_SSP */
 	default:
 		DFU_ERROR("Unknown phase\n");
 	}
@@ -163,7 +214,54 @@ static const struct usb_dfu_media usb_dfu_fops = {
 	.manifestation = dfu_callback_manifestation,
 };
 
+#if STM32MP_SSP
+int stm32cubeprog_usb_ssp(struct usb_handle *usb_core_handle,
+			  uintptr_t cert_base,
+			  size_t cert_len,
+			  uintptr_t ssp_base,
+			  size_t ssp_len)
+{
+	int ret;
+
+	usb_core_handle->user_data = (void *)&dfu_state;
+
+	INFO("DFU USB START...\n");
+	ret = usb_core_start(usb_core_handle);
+	if (ret != USBD_OK) {
+		return -EIO;
+	}
+
+	if (cert_base == UNDEFINED_DOWN_ADDR) {
+		struct dfu_state *dfu = (struct dfu_state *)usb_core_handle->user_data;
+
+		/* Send Provisioning message to programmer for reboot */
+		DFU_ERROR("Provisioning\n");
+	} else {
+		dfu_state.phase = PHASE_SSP;
+		dfu_state.address = ssp_base;
+		dfu_state.base = ssp_base;
+		dfu_state.len = ssp_len;
+		dfu_state.cert_base = cert_base;
+		dfu_state.cert_len = cert_len;
+	}
+
+	ret = usb_dfu_loop(usb_core_handle, &usb_dfu_fops);
+	if (ret != USBD_OK) {
+		return -EIO;
+	}
+
+	INFO("DFU USB STOP...\n");
+	ret = usb_core_stop(usb_core_handle);
+	if (ret != USBD_OK) {
+		return -EIO;
+	}
+
+	return 0;
+}
+#endif
+
 int stm32cubeprog_usb_load(struct usb_handle *usb_core_handle,
+			   uint8_t phase,
 			   uintptr_t base,
 			   size_t len)
 {
@@ -177,7 +275,7 @@ int stm32cubeprog_usb_load(struct usb_handle *usb_core_handle,
 		return -EIO;
 	}
 
-	dfu_state.phase = PHASE_SSBL;
+	dfu_state.phase = phase;
 	dfu_state.address = base;
 	dfu_state.base = base;
 	dfu_state.len = len;

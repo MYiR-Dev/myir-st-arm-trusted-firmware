@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2023, ARM Limited and Contributors. All rights reserved.
+ * Copyright (c) 2016-2023, Arm Limited and Contributors. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -40,30 +40,37 @@ static gicv2_driver_data_t platform_gic_data = {
 
 static struct stm32mp_gic_instance stm32mp_gic;
 
+static gicv2_dist_ctx_t gicv2_dist_ctx;
+
 void stm32mp_gic_init(void)
 {
 	int node;
 	void *fdt;
 	const fdt32_t *cuint;
-	struct dt_node_info dt_gic;
 
 	if (fdt_get_address(&fdt) == 0) {
 		panic();
 	}
 
-	node = dt_get_node(&dt_gic, -1, "arm,cortex-a7-gic");
+	node = fdt_node_offset_by_compatible(fdt, -1, "arm,cortex-a7-gic");
 	if (node < 0) {
 		panic();
 	}
-
-	platform_gic_data.gicd_base = dt_gic.base;
 
 	cuint = fdt_getprop(fdt, node, "reg", NULL);
 	if (cuint == NULL) {
 		panic();
 	}
 
-	platform_gic_data.gicc_base = fdt32_to_cpu(*(cuint + 2));
+#ifdef __aarch64__
+	platform_gic_data.gicd_base = (uintptr_t)fdt32_to_cpu(cuint[0]) << 32;
+	platform_gic_data.gicd_base |= fdt32_to_cpu(cuint[1]);
+	platform_gic_data.gicc_base = (uintptr_t)fdt32_to_cpu(cuint[4]) << 32;
+	platform_gic_data.gicc_base |= fdt32_to_cpu(cuint[5]);
+#else /* __aarch64__ */
+	platform_gic_data.gicd_base = fdt32_to_cpu(cuint[0]);
+	platform_gic_data.gicc_base = fdt32_to_cpu(cuint[2]);
+#endif /* __aarch64__ */
 
 	cuint = fdt_getprop(fdt, node, "#interrupt-cells", NULL);
 	if (cuint == NULL) {
@@ -81,11 +88,34 @@ void stm32mp_gic_init(void)
 	gicv2_distif_init();
 
 	stm32mp_gic_pcpu_init();
+	gicv2_cpuif_enable();
+}
+
+void stm32mp_gic_cpuif_enable(void)
+{
+	gicv2_cpuif_enable();
+}
+
+void stm32mp_gic_cpuif_disable(void)
+{
+	gicv2_cpuif_disable();
 }
 
 void stm32mp_gic_pcpu_init(void)
 {
 	gicv2_pcpu_distif_init();
 	gicv2_set_pe_target_mask(plat_my_core_pos());
-	gicv2_cpuif_enable();
+}
+
+void stm32mp_gic_save(void)
+{
+	gicv2_distif_save(&gicv2_dist_ctx);
+}
+
+void stm32mp_gic_resume(void)
+{
+	gicv2_distif_init();
+	stm32mp_gic_pcpu_init();
+
+	gicv2_distif_restore(&gicv2_dist_ctx);
 }

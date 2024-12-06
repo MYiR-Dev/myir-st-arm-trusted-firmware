@@ -186,65 +186,7 @@ enum stm32_clock {
 	_MCE,
 	_FMC_K,
 	_QSPI_K,
-#if defined(IMAGE_BL32)
-	_LTDC,
-	_DMA1,
-	_DMA2,
-	_MDMA,
-	_ETH1MAC,
-	_USBH,
-	_TIM2,
-	_TIM3,
-	_TIM4,
-	_TIM5,
-	_TIM6,
-	_TIM7,
-	_LPTIM1_K,
-	_SPI2_K,
-	_SPI3_K,
-	_SPDIF_K,
-	_TIM1,
-	_TIM8,
-	_SPI1_K,
-	_SAI1_K,
-	_SAI2_K,
-	_DFSDM,
-	_FDCAN_K,
-	_TIM13,
-	_TIM14,
-	_TIM16,
-	_TIM17,
-	_SPI4_K,
-	_SPI5_K,
-	_I2C1_K,
-	_I2C2_K,
-	_ADFSDM,
-	_LPTIM2_K,
-	_LPTIM3_K,
-	_LPTIM4_K,
-	_LPTIM5_K,
-	_VREF,
-	_DTS,
-	_PMBCTRL,
-	_HDP,
-	_STGENRO,
-	_DCMIPP_K,
-	_DMAMUX1,
-	_DMAMUX2,
-	_DMA3,
-	_ADC1_K,
-	_ADC2_K,
-	_TSC,
-	_AXIMC,
-	_ETH1CK,
-	_ETH1TX,
-	_ETH1RX,
-	_CRC1,
-	_ETH2CK,
-	_ETH2TX,
-	_ETH2RX,
-	_ETH2MAC,
-#endif
+
 	CK_LAST
 };
 
@@ -894,6 +836,35 @@ enum stm32_osc {
 	NB_OSCILLATOR
 };
 
+#define BYPASS(_offset, _bit_byp, _bit_digbyp) &(struct stm32_clk_bypass){\
+	.offset		= (_offset),\
+	.bit_byp	= (_bit_byp),\
+	.bit_digbyp	= (_bit_digbyp),\
+}
+
+#define CSS(_offset, _bit_css)	&(struct stm32_clk_css){\
+	.offset		= (_offset),\
+	.bit_css	= (_bit_css),\
+}
+
+#define DRIVE(_offset, _shift, _width, _default) &(struct stm32_clk_drive){\
+	.offset		= (_offset),\
+	.drv_shift	= (_shift),\
+	.drv_width	= (_width),\
+	.drv_default	= (_default),\
+}
+
+#define OSCILLATOR(idx_osc, _id, _name, _gate_id, _gate_rdy_id, _bypass, _css, _drive) \
+	[(idx_osc)] = (struct clk_oscillator_data){\
+		.name		= (_name),\
+		.id_clk		= (_id),\
+		.gate_id	= (_gate_id),\
+		.gate_rdy_id	= (_gate_rdy_id),\
+		.bypass		= (_bypass),\
+		.css		= (_css),\
+		.drive		= (_drive),\
+	}
+
 enum stm32mp1_pll_id {
 	_PLL1,
 	_PLL2,
@@ -947,9 +918,99 @@ static bool pll4_bootrom;
 #endif
 
 /* RCC clock device driver private */
-static unsigned int refcounts_mp13[CK_LAST];
+static uint8_t refcounts_mp13[CK_LAST];
 
 static const struct stm32_clk_pll *clk_st32_pll_data(unsigned int idx);
+
+static void clk_oscillator_set_bypass(struct stm32_clk_priv *priv, int id,
+				      bool digbyp, bool bypass)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	struct stm32_clk_bypass *bypass_data = osc_data->bypass;
+	uintptr_t address;
+
+	if (bypass_data == NULL) {
+		return;
+	}
+
+	address = priv->base + bypass_data->offset;
+
+	if (digbyp) {
+		mmio_setbits_32(address, BIT(bypass_data->bit_digbyp));
+	}
+
+	if (bypass || digbyp) {
+		mmio_setbits_32(address, BIT(bypass_data->bit_byp));
+	}
+}
+
+static void clk_oscillator_set_css(struct stm32_clk_priv *priv, int id,
+				   bool css)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	struct stm32_clk_css *css_data = osc_data->css;
+	uintptr_t address;
+
+	if (css_data == NULL) {
+		return;
+	}
+
+	address = priv->base + css_data->offset;
+
+	if (css) {
+		mmio_setbits_32(address, BIT(css_data->bit_css));
+	}
+}
+
+static void clk_oscillator_set_drive(struct stm32_clk_priv *priv, int id,
+				     uint8_t lsedrv)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	struct stm32_clk_drive *drive_data = osc_data->drive;
+	uintptr_t address;
+	uint32_t mask;
+	uint32_t value;
+
+	if (drive_data == NULL) {
+		return;
+	}
+
+	address = priv->base + drive_data->offset;
+
+	mask = (BIT(drive_data->drv_width) - 1U) <<  drive_data->drv_shift;
+
+	/*
+	 * Warning: not recommended to switch directly from "high drive"
+	 * to "medium low drive", and vice-versa.
+	 */
+	value = (mmio_read_32(address) & mask) >> drive_data->drv_shift;
+
+	while (value != lsedrv) {
+		if (value > lsedrv) {
+			value--;
+		} else {
+			value++;
+		}
+
+		mmio_clrsetbits_32(address, mask, value << drive_data->drv_shift);
+	}
+}
+
+static int clk_oscillator_wait_ready(struct stm32_clk_priv *priv, int id,
+				     bool ready_on)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	return _clk_stm32_gate_wait_ready(priv, osc_data->gate_rdy_id, ready_on);
+}
+
+static int clk_oscillator_wait_ready_on(struct stm32_clk_priv *priv, int id)
+{
+	return clk_oscillator_wait_ready(priv, id, true);
+}
 
 #if STM32MP_UART_PROGRAMMER || STM32MP_USB_PROGRAMMER
 static void clk_oscillator_check_bypass(struct stm32_clk_priv *priv, int idx,
@@ -1007,6 +1068,11 @@ static void stm32_enable_oscillator_lse(struct stm32_clk_priv *priv)
 		return;
 	}
 
+	/* Do not reconfigure LSE if already enabled */
+	if (_clk_stm32_gate_is_enabled(priv, osc_data->gate_id)) {
+		return;
+	}
+
 	clk_oscillator_set_bypass(priv, _CK_LSE, digbyp, bypass);
 
 	clk_oscillator_set_drive(priv, _CK_LSE, drive);
@@ -1027,8 +1093,8 @@ static int stm32mp1_set_hsidiv(uint8_t hsidiv)
 	timeout = timeout_init_us(HSIDIV_TIMEOUT);
 	while ((mmio_read_32(address) & RCC_OCRDYR_HSIDIVRDY) == 0U) {
 		if (timeout_elapsed(timeout)) {
-			ERROR("HSIDIV failed @ 0x%lx: 0x%x\n",
-			      address, mmio_read_32(address));
+			EARLY_ERROR("HSIDIV failed @ 0x%lx: 0x%x\n",
+				    address, mmio_read_32(address));
 			return -ETIMEDOUT;
 		}
 	}
@@ -1050,7 +1116,7 @@ static int stm32mp1_hsidiv(unsigned long hsifreq)
 	}
 
 	if (hsidiv == 4U) {
-		ERROR("Invalid clk-hsi frequency\n");
+		EARLY_ERROR("Invalid clk-hsi frequency\n");
 		return -EINVAL;
 	}
 
@@ -1292,7 +1358,7 @@ static void clk_stm32_pll_config_vco(struct stm32_clk_priv *priv,
 	uint32_t value = 0;
 
 	if (clk_stm32_pll_compute_cfgr1(priv, pll, vco, &value) != 0) {
-		ERROR("Invalid Vref clock !\n");
+		EARLY_ERROR("Invalid Vref clock !\n");
 		panic();
 	}
 
@@ -1352,6 +1418,124 @@ static inline struct stm32_pll_dt_cfg *clk_stm32_pll_get_pdata(int pll_idx)
 	return &pdata->pll[pll_idx];
 }
 
+
+/* Define characteristic for PLL1 : PLL_2000 */
+#define POST_DIVM_MIN	8000000U
+#define POST_DIVM_MAX	16000000U
+#define DIVM_MIN	0U
+#define DIVM_MAX	63U
+#define DIVN_MIN	24U
+#define DIVN_MAX	99U
+#define DIVP_MIN	0U
+#define DIVP_MAX	127U
+#define FRAC_MAX	8192U
+#define VCO_MIN		992000000U
+#define VCO_MAX		2000000000U
+
+static int clk_compute_pll1_settings(uint32_t freq_khz)
+{
+	struct stm32_clk_priv *priv = clk_stm32_get_priv();
+	struct stm32_pll_dt_cfg *pll1 = clk_stm32_pll_get_pdata(_PLL1);
+	struct stm32_pll_dt_cfg *pll2 = clk_stm32_pll_get_pdata(_PLL2);
+	unsigned long long best_diff = ULLONG_MAX;
+	unsigned int divm;
+	unsigned long input_freq = 0UL;
+	uint32_t src =  pll2->vco.src;
+
+	/* PLL1 share the same clock source than PLL2 */
+	switch (src) {
+	case CLK_PLL12_HSI:
+		input_freq = _clk_stm32_get_rate(priv, _CK_HSI);
+		break;
+	case CLK_PLL12_HSE:
+		input_freq = _clk_stm32_get_rate(priv, _CK_HSE);
+		break;
+	default:
+		break;
+	}
+
+	if (input_freq == 0UL) {
+		panic();
+	}
+
+	/* Following parameters have always the same value */
+	pll1->output.output[PLL_CFG_Q] = 0U;
+	pll1->output.output[PLL_CFG_R] = 0U;
+
+	for (divm = (DIVM_MAX + 1U); divm != DIVM_MIN; divm--) {
+		unsigned long post_divm = input_freq / divm;
+		unsigned int divp;
+
+		if ((post_divm < POST_DIVM_MIN) || (post_divm > POST_DIVM_MAX)) {
+			continue;
+		}
+
+		for (divp = DIVP_MIN; divp <= DIVP_MAX; divp++) {
+			unsigned long long output_freq = freq_khz * 1000ULL;
+			unsigned long long freq;
+			unsigned long long divn;
+			unsigned long long frac;
+			unsigned int i;
+
+			freq = output_freq * divm * (divp + 1U);
+
+			divn = (freq / input_freq) - 1U;
+			if ((divn < DIVN_MIN) || (divn > DIVN_MAX)) {
+				continue;
+			}
+
+			frac = ((freq * FRAC_MAX) / input_freq) - ((divn + 1U) * FRAC_MAX);
+
+			/* 2 loops to refine the fractional part */
+			for (i = 2U; i != 0U; i--) {
+				unsigned long long diff;
+				unsigned long long vco;
+
+				if (frac > FRAC_MAX) {
+					break;
+				}
+
+				vco = (post_divm * (divn + 1U)) + ((post_divm * frac) / FRAC_MAX);
+
+				if ((vco < (VCO_MIN / 2U)) || (vco > (VCO_MAX / 2U))) {
+					frac++;
+					continue;
+				}
+
+				freq = vco / (divp + 1U);
+				if (output_freq < freq) {
+					diff = freq - output_freq;
+				} else {
+					diff = output_freq - freq;
+				}
+
+				if (diff < best_diff)  {
+					pll1->vco.src = src;
+					pll1->vco.status = RCC_PLLNCR_DIVPEN | RCC_PLLNCR_PLLON;
+					pll1->vco.div_mn[PLL_CFG_M] = divm - 1U;
+					pll1->vco.div_mn[PLL_CFG_N] = (uint32_t)divn;
+					pll1->vco.frac = (uint32_t)frac;
+					pll1->output.output[PLL_CFG_P] = divp;
+
+					if (diff == 0U) {
+						return 0;
+					}
+
+					best_diff = diff;
+				}
+
+				frac++;
+			}
+		}
+	}
+
+	if (best_diff == ULLONG_MAX) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static bool _clk_stm32_pll_is_enabled(struct stm32_clk_priv *priv, const struct stm32_clk_pll *pll)
 {
 	uintptr_t pll_base = priv->base + pll->reg_pllxcr;
@@ -1388,8 +1572,8 @@ static int _clk_stm32_pll_wait_ready_on(struct stm32_clk_priv *priv,
 	/* Wait PLL lock */
 	while ((mmio_read_32(pll_base) & RCC_PLLNCR_PLLRDY) == 0U) {
 		if (timeout_elapsed(timeout)) {
-			ERROR("%d clock start failed @ 0x%x: 0x%x\n",
-			      pll->clk_id, pll->reg_pllxcr, mmio_read_32(pll_base));
+			ERROR("PLL%d start failed @ 0x%x: 0x%x\n",
+			      pll->clk_id - _CK_PLL1 + 1, pll->reg_pllxcr, mmio_read_32(pll_base));
 			return -EINVAL;
 		}
 	}
@@ -1406,8 +1590,8 @@ static int _clk_stm32_pll_wait_ready_off(struct stm32_clk_priv *priv,
 	/* Wait PLL lock */
 	while ((mmio_read_32(pll_base) & RCC_PLLNCR_PLLRDY) != 0U) {
 		if (timeout_elapsed(timeout)) {
-			ERROR("%d clock stop failed @ 0x%x: 0x%x\n",
-			      pll->clk_id, pll->reg_pllxcr, mmio_read_32(pll_base));
+			ERROR("PLL%d stop failed @ 0x%x: 0x%x\n",
+			      pll->clk_id - _CK_PLL1 + 1, pll->reg_pllxcr, mmio_read_32(pll_base));
 			return -EINVAL;
 		}
 	}
@@ -1609,6 +1793,140 @@ static const char *clk_stm32_get_oscillator_name(enum stm32_osc id)
 	return NULL;
 }
 
+static unsigned long clk_stm32_osc_recalc_rate(struct stm32_clk_priv *priv,
+					       int id, unsigned long prate)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	return osc_data->frequency;
+};
+
+static bool clk_stm32_osc_gate_is_enabled(struct stm32_clk_priv *priv, int id)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	return _clk_stm32_gate_is_enabled(priv, osc_data->gate_id);
+
+}
+
+static int clk_stm32_osc_gate_enable(struct stm32_clk_priv *priv, int id)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	if (osc_data->frequency == 0UL) {
+		return 0;
+	}
+
+	_clk_stm32_gate_enable(priv, osc_data->gate_id);
+
+	if (_clk_stm32_gate_wait_ready(priv, osc_data->gate_rdy_id, true) != 0U) {
+		ERROR("%s: %s (%d)\n", __func__, osc_data->name, __LINE__);
+		panic();
+	}
+
+	return 0;
+}
+
+static void clk_stm32_osc_gate_disable(struct stm32_clk_priv *priv, int id)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+
+	if (osc_data->frequency == 0UL) {
+		return;
+	}
+
+	_clk_stm32_gate_disable(priv, osc_data->gate_id);
+
+	if (_clk_stm32_gate_wait_ready(priv, osc_data->gate_rdy_id, false) != 0U) {
+		ERROR("%s: %s (%d)\n", __func__, osc_data->name, __LINE__);
+		panic();
+	}
+}
+
+static unsigned long clk_stm32_get_dt_oscillator_frequency(const char *name)
+{
+	void *fdt = NULL;
+	int node = 0;
+	int subnode = 0;
+
+	if (fdt_get_address(&fdt) == 0) {
+		panic();
+	}
+
+	node = fdt_path_offset(fdt, "/clocks");
+	if (node < 0) {
+		return 0UL;
+	}
+
+	fdt_for_each_subnode(subnode, fdt, node) {
+		const char *cchar = NULL;
+		const fdt32_t *cuint = NULL;
+		int ret = 0;
+
+		cchar = fdt_get_name(fdt, subnode, &ret);
+		if (cchar == NULL) {
+			continue;
+		}
+
+		if (strncmp(cchar, name, (size_t)ret) ||
+		    fdt_get_status(subnode) == DT_DISABLED) {
+			continue;
+		}
+
+		cuint = fdt_getprop(fdt, subnode, "clock-frequency", &ret);
+		if (cuint == NULL) {
+			return 0UL;
+		}
+
+		return fdt32_to_cpu(*cuint);
+	}
+
+	return 0UL;
+}
+
+static void clk_stm32_osc_init(struct stm32_clk_priv *priv, int id)
+{
+	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
+	const char *name = osc_data->name;
+
+	osc_data->frequency = clk_stm32_get_dt_oscillator_frequency(name);
+}
+
+static struct stm32_clk_ops clk_stm32_osc_ops = {
+	.recalc_rate	= clk_stm32_osc_recalc_rate,
+	.is_enabled	= clk_stm32_osc_gate_is_enabled,
+	.enable		= clk_stm32_osc_gate_enable,
+	.disable	= clk_stm32_osc_gate_disable,
+	.init		= clk_stm32_osc_init,
+};
+
+static struct stm32_clk_ops clk_stm32_osc_nogate_ops = {
+	.recalc_rate	= clk_stm32_osc_recalc_rate,
+	.init		= clk_stm32_osc_init,
+};
+
+#define CLK_OSC(idx, _idx, _parent, _osc_id) \
+	[(idx)] = (struct clk_stm32){ \
+		.binding	= (_idx),\
+		.parent		= (_parent),\
+		.flags		= CLK_IS_CRITICAL,\
+		.clock_cfg	= &(struct stm32_osc_cfg){\
+			.osc_id = (_osc_id),\
+		},\
+		.ops		= STM32_OSC_OPS,\
+	}
+
+#define CLK_OSC_FIXED(idx, _idx, _parent, _osc_id) \
+	[(idx)] = (struct clk_stm32){ \
+		.binding	= (_idx),\
+		.parent		= (_parent),\
+		.flags		= CLK_IS_CRITICAL,\
+		.clock_cfg	= &(struct stm32_osc_cfg){\
+			.osc_id	= (_osc_id),\
+		},\
+		.ops		= STM32_OSC_NOGATE_OPS,\
+	}
+
 #define CLK_PLL_CFG(_idx, _clk_id, _type, _reg)\
 	[(_idx)] = {\
 		.clk_id = (_clk_id),\
@@ -1629,7 +1947,7 @@ static const struct stm32_clk_pll *clk_st32_pll_data(unsigned int idx)
 }
 
 struct stm32_pll_cfg {
-	int pll_id;
+	uint8_t pll_id;
 };
 
 static unsigned long clk_stm32_pll_recalc_rate(struct stm32_clk_priv *priv,  int id,
@@ -1711,12 +2029,12 @@ static const struct stm32_clk_ops clk_stm32_pll_ops = {
 	.clock_cfg	= &(struct stm32_pll_cfg) {\
 		.pll_id = _pll_id,\
 	},\
-	.ops = &clk_stm32_pll_ops,\
+	.ops = STM32_PLL_OPS,\
 }
 
 struct clk_stm32_composite_cfg {
-	int gate_id;
-	int div_id;
+	uint8_t gate_id;
+	uint8_t div_id;
 };
 
 static unsigned long clk_stm32_composite_recalc_rate(struct stm32_clk_priv *priv,
@@ -1768,8 +2086,33 @@ static const struct stm32_clk_ops clk_stm32_composite_ops = {
 		.gate_id	= (_gate_id),\
 		.div_id	= (_div_id),\
 	},\
-	.ops = &clk_stm32_composite_ops,\
+	.ops = STM32_COMPOSITE_OPS,\
 }
+
+enum {
+	STM32_PLL_OPS = STM32_LAST_OPS,
+	STM32_COMPOSITE_OPS,
+	STM32_OSC_OPS,
+	STM32_OSC_NOGATE_OPS,
+
+	MP13_LAST_OPS
+};
+
+static const struct stm32_clk_ops *ops_array_mp13[MP13_LAST_OPS] = {
+	[NO_OPS] =  NULL,
+	[FIXED_FACTOR_OPS] = &clk_fixed_factor_ops,
+	[GATE_OPS] = &clk_gate_ops,
+	[STM32_MUX_OPS] = &clk_mux_ops,
+	[STM32_DIVIDER_OPS] = &clk_stm32_divider_ops,
+	[STM32_GATE_OPS] = &clk_stm32_gate_ops,
+	[STM32_TIMER_OPS] = &clk_timer_ops,
+	[STM32_FIXED_RATE_OPS] = &clk_stm32_fixed_rate_ops,
+	[STM32_OSC_OPS] = &clk_stm32_osc_ops,
+	[STM32_OSC_NOGATE_OPS] = &clk_stm32_osc_nogate_ops,
+
+	[STM32_PLL_OPS] = &clk_stm32_pll_ops,
+	[STM32_COMPOSITE_OPS] = &clk_stm32_composite_ops
+};
 
 static const struct clk_stm32 stm32mp13_clk[CK_LAST] = {
 	/* ROOT CLOCKS */
@@ -1882,7 +2225,6 @@ static const struct clk_stm32 stm32mp13_clk[CK_LAST] = {
 	STM32_GATE(_SDMMC2_K, SDMMC2_K, MUX(MUX_SDMMC2), 0, GATE_SDMMC2),
 	STM32_GATE(_DBGCK, CK_DBG, _CKAXI, 0, GATE_DBGCK),
 
-/* TODO: CHECK CLOCK FOR BL2/BL32 AND IF ONLY FOR TEST OR NOT */
 	STM32_GATE(_USART3_K, USART3_K, MUX(MUX_UART35), 0, GATE_USART3),
 	STM32_GATE(_UART4_K, UART4_K, MUX(MUX_UART4), 0, GATE_UART4),
 	STM32_GATE(_UART5_K, UART5_K, MUX(MUX_UART35), 0, GATE_UART5),
@@ -1896,61 +2238,6 @@ static const struct clk_stm32 stm32mp13_clk[CK_LAST] = {
 	STM32_COMPOSITE(_MCO1_K, CK_MCO1, MUX(MUX_MCO1), 0, GATE_MCO1, DIV_MCO1),
 	STM32_COMPOSITE(_MCO2_K, CK_MCO2, MUX(MUX_MCO2), 0, GATE_MCO2, DIV_MCO2),
 	STM32_COMPOSITE(_TRACECK, CK_TRACE, _CKAXI, 0, GATE_TRACECK, DIV_TRACE),
-
-#if defined(IMAGE_BL32)
-	STM32_GATE(_TIM2, TIM2_K, _CKTIMG1, 0, GATE_TIM2),
-	STM32_GATE(_TIM3, TIM3_K, _CKTIMG1, 0, GATE_TIM3),
-	STM32_GATE(_TIM4, TIM4_K, _CKTIMG1, 0, GATE_TIM4),
-	STM32_GATE(_TIM5, TIM5_K, _CKTIMG1, 0, GATE_TIM5),
-	STM32_GATE(_TIM6, TIM6_K, _CKTIMG1, 0, GATE_TIM6),
-	STM32_GATE(_TIM7, TIM7_K, _CKTIMG1, 0, GATE_TIM7),
-	STM32_GATE(_TIM13, TIM13_K, _CKTIMG3, 0, GATE_TIM13),
-	STM32_GATE(_TIM14, TIM14_K, _CKTIMG3, 0, GATE_TIM14),
-	STM32_GATE(_LPTIM1_K, LPTIM1_K, MUX(MUX_LPTIM1), 0, GATE_LPTIM1),
-	STM32_GATE(_SPI2_K, SPI2_K, MUX(MUX_SPI23), 0, GATE_SPI2),
-	STM32_GATE(_SPI3_K, SPI3_K, MUX(MUX_SPI23), 0, GATE_SPI3),
-	STM32_GATE(_SPDIF_K, SPDIF_K, MUX(MUX_SPDIF), 0, GATE_SPDIF),
-	STM32_GATE(_TIM1, TIM1_K, _CKTIMG2, 0, GATE_TIM1),
-	STM32_GATE(_TIM8, TIM8_K, _CKTIMG2, 0, GATE_TIM8),
-	STM32_GATE(_TIM16, TIM16_K, _CKTIMG3, 0, GATE_TIM16),
-	STM32_GATE(_TIM17, TIM17_K, _CKTIMG3, 0, GATE_TIM17),
-	STM32_GATE(_SPI1_K, SPI1_K, MUX(MUX_SPI1), 0, GATE_SPI1),
-	STM32_GATE(_SPI4_K, SPI4_K, MUX(MUX_SPI4), 0, GATE_SPI4),
-	STM32_GATE(_SPI5_K, SPI5_K, MUX(MUX_SPI5), 0, GATE_SPI5),
-	STM32_GATE(_SAI1_K, SAI1_K, MUX(MUX_SAI1), 0, GATE_SAI1),
-	STM32_GATE(_SAI2_K, SAI2_K, MUX(MUX_SAI2), 0, GATE_SAI2),
-	STM32_GATE(_DFSDM, DFSDM_K, MUX(MUX_SAI1), 0, GATE_DFSDM),
-	STM32_GATE(_FDCAN_K, FDCAN_K, MUX(MUX_FDCAN), 0, GATE_FDCAN),
-	STM32_GATE(_USBH, USBH, _CKAXI, 0, GATE_USBH),
-	STM32_GATE(_I2C1_K, I2C1_K, MUX(MUX_I2C12), 0, GATE_I2C1),
-	STM32_GATE(_I2C2_K, I2C2_K, MUX(MUX_I2C12), 0, GATE_I2C2),
-	STM32_GATE(_ADFSDM, ADFSDM_K, MUX(MUX_SAI1), 0, GATE_ADFSDM),
-	STM32_GATE(_LPTIM2_K, LPTIM2_K, MUX(MUX_LPTIM2), 0, GATE_LPTIM2),
-	STM32_GATE(_LPTIM3_K, LPTIM3_K, MUX(MUX_LPTIM3), 0, GATE_LPTIM3),
-	STM32_GATE(_LPTIM4_K, LPTIM4_K, MUX(MUX_LPTIM45), 0, GATE_LPTIM4),
-	STM32_GATE(_LPTIM5_K, LPTIM5_K, MUX(MUX_LPTIM45), 0, GATE_LPTIM5),
-	STM32_GATE(_VREF, VREF, _PCLK3, 0, GATE_VREF),
-	STM32_GATE(_DTS, TMPSENS, _PCLK3, 0, GATE_DTS),
-	STM32_GATE(_PMBCTRL, PMBCTRL, _PCLK3, 0, GATE_HDP),
-	STM32_GATE(_HDP, HDP, _PCLK3, 0, GATE_PMBCTRL),
-	STM32_GATE(_STGENRO, STGENRO, _PCLK4, 0, GATE_DCMIPP),
-	STM32_GATE(_DCMIPP_K, DCMIPP_K, MUX(MUX_DCMIPP), 0, GATE_DCMIPP),
-	STM32_GATE(_DMAMUX1, DMAMUX1, _CKAXI, 0, GATE_DMAMUX1),
-	STM32_GATE(_DMAMUX2, DMAMUX2, _CKAXI, 0, GATE_DMAMUX2),
-	STM32_GATE(_DMA3, DMA3, _CKAXI, 0, GATE_DMAMUX2),
-	STM32_GATE(_ADC1_K, ADC1_K, MUX(MUX_ADC1), 0, GATE_ADC1),
-	STM32_GATE(_ADC2_K, ADC2_K, MUX(MUX_ADC2), 0, GATE_ADC2),
-	STM32_GATE(_TSC, TSC, _CKAXI, 0, GATE_TSC),
-	STM32_GATE(_AXIMC, AXIMC, _CKAXI, 0, GATE_AXIMC),
-	STM32_GATE(_CRC1, CRC1, _CKAXI, 0, GATE_ETH1TX),
-	STM32_GATE(_ETH1CK, ETH1CK_K, MUX(MUX_ETH1), 0, GATE_ETH1CK),
-	STM32_GATE(_ETH1TX, ETH1TX, _CKAXI, 0, GATE_ETH1TX),
-	STM32_GATE(_ETH1RX, ETH1RX, _CKAXI, 0, GATE_ETH1RX),
-	STM32_GATE(_ETH2CK, ETH2CK_K, MUX(MUX_ETH2), 0, GATE_ETH2CK),
-	STM32_GATE(_ETH2TX, ETH2TX, _CKAXI, 0, GATE_ETH2TX),
-	STM32_GATE(_ETH2RX, ETH2RX, _CKAXI, 0, GATE_ETH2RX),
-	STM32_GATE(_ETH2MAC, ETH2MAC, _CKAXI, 0, GATE_ETH2MAC),
-#endif
 };
 
 static struct stm32_pll_dt_cfg mp13_pll[_PLL_NB];
@@ -1986,6 +2273,7 @@ static struct stm32_clk_priv stm32mp13_clock_data = {
 	.nb_osci_data	= ARRAY_SIZE(stm32mp13_osc_data),
 	.gate_refcounts	= refcounts_mp13,
 	.pdata		= &stm32mp13_clock_pdata,
+	.ops_array	= ops_array_mp13,
 };
 
 static int stm32mp1_init_clock_tree(void)
@@ -2071,8 +2359,6 @@ static int stm32mp1_init_clock_tree(void)
 
 	return 0;
 }
-
-#define LSEDRV_MEDIUM_HIGH 2
 
 static int clk_stm32_parse_oscillator_fdt(void *fdt, int node, const char *name,
 					  struct stm32_osci_dt_cfg *osci)
@@ -2241,7 +2527,8 @@ static int stm32_clk_parse_fdt_all_pll(void *fdt, int node, struct stm32_clk_pla
 {
 	size_t i = 0U;
 
-	for (i = _PLL1; i < pdata->npll; i++) {
+	/* PLL1 is not configurable with device tree */
+	for (i = _PLL2; i < pdata->npll; i++) {
 		struct stm32_pll_dt_cfg *pll = &pdata->pll[i];
 		char name[RCC_PLL_NAME_SIZE];
 		int subnode = 0;
@@ -2301,8 +2588,33 @@ static int stm32_clk_parse_fdt(struct stm32_clk_platdata *pdata)
 	return 0;
 }
 
-int stm32mp1_clk_init(void)
+void stm32mp1_clk_rcc_regs_lock(void)
 {
+	clk_stm32_rcc_regs_lock();
+}
+
+void stm32mp1_clk_rcc_regs_unlock(void)
+{
+	clk_stm32_rcc_regs_unlock();
+}
+
+int stm32mp1_clk_init(uint32_t pll1_freq_khz)
+{
+	int ret;
+
+	/* compute the PLL1 sting, not read in device tree */
+	ret = clk_compute_pll1_settings(pll1_freq_khz);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = stm32mp1_init_clock_tree();
+	if (ret != 0) {
+		return ret;
+	}
+
+	clk_stm32_enable_critical_clocks();
+
 	return 0;
 }
 
@@ -2317,16 +2629,6 @@ int stm32mp1_clk_probe(void)
 	}
 
 	ret = clk_stm32_init(&stm32mp13_clock_data, base);
-	if (ret != 0) {
-		return ret;
-	}
 
-	ret = stm32mp1_init_clock_tree();
-	if (ret != 0) {
-		return ret;
-	}
-
-	clk_stm32_enable_critical_clocks();
-
-	return 0;
+	return ret;
 }

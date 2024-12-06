@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2021-2023, Arm Limited. All rights reserved.
+# Copyright (c) 2021-2024, Arm Limited. All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 #
@@ -596,6 +596,16 @@ subsections:
           - title: STM32MP2
             scope: stm32mp2
 
+            subsections:
+              - title: STM32MP21
+                scope: stm32mp21
+
+              - title: STM32MP23
+                scope: stm32mp23
+
+              - title: STM32MP25
+                scope: stm32mp25
+
       - title: Texas Instruments
         scope: ti
 
@@ -1141,11 +1151,26 @@ subsections:
           - title: GPIO
             scope: st-gpio
 
+          - title: NVMEM
+            scope: st-nvmem
+
+          - title: Regulator
+            scope: st-regulator
+
+          - title: Reset
+            scope: st-reset
+
+          - title: Resource Isolation Framework
+            scope: st-rif
+
           - title: SDMMC2
             scope: st-sdmmc2
 
             deprecated:
               - stm32_sdmmc2
+
+          - title: SPI
+            scope: st-spi
 
           - title: ST PMIC
             scope: st-pmic
@@ -1155,15 +1180,6 @@ subsections:
 
           - title: STPMIC1
             scope: stpmic1
-
-          - title: Regulator
-            scope: st-regulator
-
-          - title: Reset
-            scope: st-reset
-
-          - title: SPI
-            scope: st-spi
 
           - title: UART
             scope: st-uart
@@ -1253,6 +1269,16 @@ subsections:
 
           - title: STM32MP2
             scope: stm32mp2-fdts
+
+            subsections:
+              - title: STM32MP21
+                scope: stm32mp21-fdts
+
+              - title: STM32MP23
+                scope: stm32mp23-fdts
+
+              - title: STM32MP25
+                scope: stm32mp25-fdts
 
       - title: PIE
         scope: pie

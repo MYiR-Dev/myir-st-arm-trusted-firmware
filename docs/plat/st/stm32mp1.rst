@@ -7,7 +7,7 @@ It is an Armv7-A platform, using dedicated code from TF-A.
 More information can be found on `STM32MP1 Series`_ page.
 
 For TF-A common configuration of STM32 MPUs, please check
-:ref:`STM32 MPUs` page.
+:ref:`STM32 MPUs` page or `Github STM32 MPUs`_.
 
 STM32MP1 Versions
 -----------------
@@ -100,6 +100,8 @@ Dedicated STM32MP1 flags:
   | Default: 0
 - | ``STM32MP15``: to select STM32MP15 variant configuration.
   | Default: 1
+- | ``STM32MP_STPMIC1L``: to select STPMIC1L variant configuration.
+  | Default: 0
 
 
 Boot with FIP
@@ -216,5 +218,6 @@ __________________
 
 .. _STM32MP1 Series: https://www.st.com/en/microcontrollers-microprocessors/stm32mp1-series.html
 .. _STM32MP1 part number codification: https://wiki.st.com/stm32mpu/wiki/STM32MP15_microprocessor#Part_number_codification
+.. _Github STM32 MPUs: https://github.com/STMicroelectronics/arm-trusted-firmware/tree/HEAD/docs/plat/st/stm32mpus.rst
 
 *Copyright (c) 2023, STMicroelectronics - All Rights Reserved*

@@ -53,6 +53,12 @@
 	status = "okay";
 };
 
+&ddr {
+	vdd-supply = <&vdd_ddr>;
+	vtt-supply = <&vtt_ddr>;
+	vref-supply = <&vref_ddr>;
+};
+
 &hash1 {
 	status = "okay";
 };
@@ -179,7 +185,7 @@
 	};
 };
 
-&iwdg2 {
+&iwdg1 {
 	timeout-sec = <32>;
 	status = "okay";
 };
@@ -190,99 +196,87 @@
 };
 
 &rcc {
+	compatible = "st,stm32mp1-rcc-secure", "st,stm32mp1-rcc", "syscon";
 	st,clksrc = <
 		CLK_MPU_PLL1P
 		CLK_AXI_PLL2P
 		CLK_MCU_PLL3P
-		CLK_PLL12_HSE
-		CLK_PLL3_HSE
-		CLK_PLL4_HSE
-		CLK_RTC_LSE
-		CLK_MCO1_DISABLED
-		CLK_MCO2_DISABLED
-	>;
-
-	st,clkdiv = <
-		1 /*MPU*/
-		0 /*AXI*/
-		0 /*MCU*/
-		1 /*APB1*/
-		1 /*APB2*/
-		1 /*APB3*/
-		1 /*APB4*/
-		2 /*APB5*/
-		23 /*RTC*/
-		0 /*MCO1*/
-		0 /*MCO2*/
-	>;
-
-	st,pkcs = <
 		CLK_CKPER_HSE
 		CLK_FMC_ACLK
 		CLK_QSPI_ACLK
-		CLK_ETH_PLL4P
 		CLK_SDMMC12_PLL4P
-		CLK_DSI_DSIPLL
 		CLK_STGEN_HSE
-		CLK_USBPHY_HSE
-		CLK_SPI2S1_PLL3Q
-		CLK_SPI2S23_PLL3Q
-		CLK_SPI45_HSI
-		CLK_SPI6_HSI
 		CLK_I2C46_HSI
-		CLK_SDMMC3_PLL4P
-		CLK_USBO_USBPHY
-		CLK_ADC_CKPER
-		CLK_CEC_LSE
-		CLK_I2C12_HSI
-		CLK_I2C35_HSI
-		CLK_UART1_HSI
 		CLK_UART24_HSI
-		CLK_UART35_HSI
-		CLK_UART6_HSI
-		CLK_UART78_HSI
-		CLK_SPDIF_PLL4P
-		CLK_FDCAN_PLL4R
-		CLK_SAI1_PLL3Q
-		CLK_SAI2_PLL3Q
-		CLK_SAI3_PLL3Q
-		CLK_SAI4_PLL3Q
-		CLK_RNG1_LSI
-		CLK_RNG2_LSI
-		CLK_LPTIM1_PCLK1
-		CLK_LPTIM23_PCLK3
-		CLK_LPTIM45_LSE
 	>;
 
-	/* VCO = 1300.0 MHz => P = 650 (CPU) */
-	pll1: st,pll@0 {
-		compatible = "st,stm32mp1-pll";
-		reg = <0>;
-		cfg = <2 80 0 0 0 PQR(1,0,0)>;
-		frac = <0x800>;
+	st,clkdiv = <
+		DIV(DIV_MPU, 1)
+		DIV(DIV_AXI, 0)
+		DIV(DIV_MCU, 0)
+		DIV(DIV_APB1, 1)
+		DIV(DIV_APB2, 1)
+		DIV(DIV_APB3, 1)
+		DIV(DIV_APB4, 1)
+		DIV(DIV_APB5, 2)
+	>;
+
+	st,pll_vco {
+		pll2_vco_1066Mhz: pll2-vco-1066Mhz {
+			src = <CLK_PLL12_HSE>;
+			divmn = <2 65>;
+			frac = <0x1400>;
+		};
+
+		pll3_vco_417Mhz: pll3-vco-417Mhz {
+			src = <CLK_PLL3_HSE>;
+			divmn = <1 33>;
+			frac = <0x1a04>;
+		};
+
+		pll4_vco_594Mhz: pll4-vco-594Mhz {
+			src = <CLK_PLL4_HSE>;
+			divmn = <3 98>;
+		};
 	};
 
 	/* VCO = 1066.0 MHz => P = 266 (AXI), Q = 533 (GPU), R = 533 (DDR) */
 	pll2: st,pll@1 {
 		compatible = "st,stm32mp1-pll";
 		reg = <1>;
-		cfg = <2 65 1 0 0 PQR(1,1,1)>;
-		frac = <0x1400>;
+
+		st,pll = <&pll2_cfg1>;
+
+		pll2_cfg1: pll2_cfg1 {
+			st,pll_vco = <&pll2_vco_1066Mhz>;
+			st,pll_div_pqr = <1 0 0>;
+		};
 	};
 
 	/* VCO = 417.8 MHz => P = 209, Q = 24, R = 11 */
 	pll3: st,pll@2 {
 		compatible = "st,stm32mp1-pll";
 		reg = <2>;
-		cfg = <1 33 1 16 36 PQR(1,1,1)>;
-		frac = <0x1a04>;
+
+		st,pll = <&pll3_cfg1>;
+
+		pll3_cfg1: pll3_cfg1 {
+			st,pll_vco = <&pll3_vco_417Mhz>;
+			st,pll_div_pqr = <1 16 36>;
+		};
 	};
 
 	/* VCO = 594.0 MHz => P = 99, Q = 74, R = 74 */
 	pll4: st,pll@3 {
 		compatible = "st,stm32mp1-pll";
 		reg = <3>;
-		cfg = <3 98 5 7 7 PQR(1,1,1)>;
+
+		st,pll = <&pll4_cfg1>;
+
+		pll4_cfg1: pll4_cfg1 {
+			st,pll_vco = <&pll4_vco_594Mhz>;
+			st,pll_div_pqr = <5 7 7>;
+		};
 	};
 };
 

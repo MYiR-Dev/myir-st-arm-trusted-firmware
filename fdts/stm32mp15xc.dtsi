@@ -4,6 +4,8 @@
  * Author: Alexandre Torgue <alexandre.torgue@st.com> for STMicroelectronics.
  */
 
+#include "stm32mp15xa.dtsi"
+
 / {
 	soc {
 		cryp1: cryp@54001000 {

@@ -28,11 +28,11 @@
 
 /* Registers values */
 #define IWDG_KR_RELOAD_KEY	0xAAAA
+#define IWDG_KR_ENABLE_KEY	0xCCCC
 
 struct stm32_iwdg_instance {
 	uintptr_t base;
 	unsigned long clock;
-	uint8_t flags;
 	int num_irq;
 };
 
@@ -72,6 +72,20 @@ void stm32_iwdg_refresh(void)
 	}
 }
 
+static void stm32_iwdg_start(struct stm32_iwdg_instance *iwdg)
+{
+	/* 0x00000000 is not a valid address for IWDG peripherals */
+	if (iwdg->base == 0U) {
+		panic();
+	}
+
+	clk_enable(iwdg->clock);
+
+	mmio_write_32(iwdg->base + IWDG_KR_OFFSET, IWDG_KR_ENABLE_KEY);
+
+	clk_disable(iwdg->clock);
+}
+
 int stm32_iwdg_init(void)
 {
 	int node = -1;
@@ -97,18 +111,7 @@ int stm32_iwdg_init(void)
 		iwdg->base = dt_info.base;
 		iwdg->clock = (unsigned long)dt_info.clock;
 
-		/* DT can specify low power cases */
-		if (fdt_getprop(fdt, node, "stm32,enable-on-stop", NULL) ==
-		    NULL) {
-			iwdg->flags |= IWDG_DISABLE_ON_STOP;
-		}
-
-		if (fdt_getprop(fdt, node, "stm32,enable-on-standby", NULL) ==
-		    NULL) {
-			iwdg->flags |= IWDG_DISABLE_ON_STANDBY;
-		}
-
-		/* Explicit list of supported bit flags */
+		/* Read OTP to know if IWDG is started by hardware or not */
 		hw_init = stm32_iwdg_get_otp_config(idx);
 
 		if ((hw_init & IWDG_HW_ENABLED) != 0) {
@@ -117,21 +120,12 @@ int stm32_iwdg_init(void)
 				      idx + 1U);
 				panic();
 			}
-			iwdg->flags |= IWDG_HW_ENABLED;
 		}
 
 		if (dt_info.status == DT_DISABLED) {
 			zeromem((void *)iwdg,
 				sizeof(struct stm32_iwdg_instance));
 			continue;
-		}
-
-		if ((hw_init & IWDG_DISABLE_ON_STOP) != 0) {
-			iwdg->flags |= IWDG_DISABLE_ON_STOP;
-		}
-
-		if ((hw_init & IWDG_DISABLE_ON_STANDBY) != 0) {
-			iwdg->flags |= IWDG_DISABLE_ON_STANDBY;
 		}
 
 		VERBOSE("IWDG%u found, %ssecure\n", idx + 1U,
@@ -144,11 +138,10 @@ int stm32_iwdg_init(void)
 			stm32mp_register_secure_periph_iomem(iwdg->base);
 		}
 
-#if defined(IMAGE_BL2)
-		if (stm32_iwdg_shadow_update(idx, iwdg->flags) != BSEC_OK) {
-			return -1;
+		if ((hw_init & IWDG_HW_ENABLED) == 0) {
+			/* Use default timeout, ignore DT's "timeout-sec" */
+			stm32_iwdg_start(iwdg);
 		}
-#endif
 	}
 
 	VERBOSE("%u IWDG instance%s found\n", count, (count > 1U) ? "s" : "");

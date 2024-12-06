@@ -59,7 +59,11 @@ int dt_pmic_status(void)
 		return status;
 	}
 
+#if defined(IMAGE_BL2)
+	status = DT_SECURE;
+#else
 	status = (int)fdt_get_status(node);
+#endif
 
 	return status;
 }
@@ -116,6 +120,10 @@ static int dt_pmic_i2c_config(struct dt_node_info *i2c_info,
 	if (i2c_info->base == 0U) {
 		return -FDT_ERR_NOTFOUND;
 	}
+
+#if defined(IMAGE_BL2)
+	i2c_info->status = DT_SECURE;
+#endif
 
 	return stm32_i2c_get_setup_from_fdt(fdt, i2c_node, init);
 }
@@ -216,120 +224,6 @@ void print_pmic_info_and_debug(void)
 }
 #endif
 
-int pmic_ddr_power_init(enum ddr_type ddr_type)
-{
-	int status;
-	uint16_t buck3_min_mv;
-	struct rdev *buck2, *buck3, *vref;
-	struct rdev *ldo3 __unused;
-
-	buck2 = regulator_get_by_name("buck2");
-	if (buck2 == NULL) {
-		return -ENOENT;
-	}
-
-#if STM32MP15
-	ldo3 = regulator_get_by_name("ldo3");
-	if (ldo3 == NULL) {
-		return -ENOENT;
-	}
-#endif
-
-	vref = regulator_get_by_name("vref_ddr");
-	if (vref == NULL) {
-		return -ENOENT;
-	}
-
-	switch (ddr_type) {
-	case STM32MP_DDR3:
-#if STM32MP15
-		status = regulator_set_flag(ldo3, REGUL_SINK_SOURCE);
-		if (status != 0) {
-			return status;
-		}
-#endif
-
-		status = regulator_set_min_voltage(buck2);
-		if (status != 0) {
-			return status;
-		}
-
-		status = regulator_enable(buck2);
-		if (status != 0) {
-			return status;
-		}
-
-		status = regulator_enable(vref);
-		if (status != 0) {
-			return status;
-		}
-
-#if STM32MP15
-		status = regulator_enable(ldo3);
-		if (status != 0) {
-			return status;
-		}
-#endif
-		break;
-
-	case STM32MP_LPDDR2:
-	case STM32MP_LPDDR3:
-		/*
-		 * Set LDO3 to 1.8V
-		 * Set LDO3 to bypass mode if BUCK3 = 1.8V
-		 * Set LDO3 to normal mode if BUCK3 != 1.8V
-		 */
-		buck3 = regulator_get_by_name("buck3");
-		if (buck3 == NULL) {
-			return -ENOENT;
-		}
-
-		regulator_get_range(buck3, &buck3_min_mv, NULL);
-
-#if STM32MP15
-		if (buck3_min_mv != 1800) {
-			status = regulator_set_min_voltage(ldo3);
-			if (status != 0) {
-				return status;
-			}
-		} else {
-			status = regulator_set_flag(ldo3, REGUL_ENABLE_BYPASS);
-			if (status != 0) {
-				return status;
-			}
-		}
-#endif
-
-		status = regulator_set_min_voltage(buck2);
-		if (status != 0) {
-			return status;
-		}
-
-#if STM32MP15
-		status = regulator_enable(ldo3);
-		if (status != 0) {
-			return status;
-		}
-#endif
-
-		status = regulator_enable(buck2);
-		if (status != 0) {
-			return status;
-		}
-
-		status = regulator_enable(vref);
-		if (status != 0) {
-			return status;
-		}
-		break;
-
-	default:
-		break;
-	};
-
-	return 0;
-}
-
 int pmic_voltages_init(void)
 {
 #if STM32MP13
@@ -358,6 +252,16 @@ int pmic_voltages_init(void)
 #endif
 
 	return 0;
+}
+
+void pmic_switch_off(void)
+{
+	if (stpmic1_switch_off() == 0) {
+		udelay(100);
+	}
+
+	/* Shouldn't be reached */
+	panic();
 }
 
 enum {
@@ -478,6 +382,24 @@ static const struct regul_description pmic_regs[NB_REG] = {
 	[STPMIC1_SW_OUT] = DEFINE_REGU("pwr_sw2"),
 };
 
+static int handle_pmic_property(void *fdt, int subnode,
+				const struct regul_description *desc,
+				const char *property, uint16_t flag)
+{
+	if (fdt_getprop(fdt, subnode, property, NULL)  != NULL) {
+		int ret;
+
+		VERBOSE("%s: %s\n", desc->node_name, property);
+		ret = pmic_set_flag(desc, flag);
+		if (ret != 0) {
+			ERROR("set %s failed\n", property);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 static int register_pmic(void)
 {
 	void *fdt;
@@ -517,6 +439,27 @@ static int register_pmic(void)
 		if (ret != 0) {
 			WARN("%s:%d failed to register %s\n", __func__,
 			     __LINE__, reg_name);
+			return ret;
+		}
+
+		ret = handle_pmic_property(fdt, subnode, desc,
+					   "st,mask-reset",
+					   REGUL_MASK_RESET);
+		if (ret != 0) {
+			return ret;
+		}
+
+		ret = handle_pmic_property(fdt, subnode, desc,
+					   "st,regulator-sink-source",
+					   REGUL_SINK_SOURCE);
+		if (ret != 0) {
+			return ret;
+		}
+
+		ret = handle_pmic_property(fdt, subnode, desc,
+					   "st,regulator-bypass",
+					   REGUL_ENABLE_BYPASS);
+		if (ret != 0) {
 			return ret;
 		}
 	}

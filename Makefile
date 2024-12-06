@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2023, Arm Limited and Contributors. All rights reserved.
+# Copyright (c) 2013-2024, Arm Limited and Contributors. All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 #
@@ -132,6 +132,10 @@ ENCTOOL			?=	${ENCTOOLPATH}/encrypt_fw${BIN_EXT}
 # Variables for use with Firmware Image Package
 FIPTOOLPATH		?=	tools/fiptool
 FIPTOOL			?=	${FIPTOOLPATH}/fiptool${BIN_EXT}
+
+# Variables for use with Firmware Update Metadata
+FWUMDTOOLPATH		?=	tools/fwu_gen_metadata/
+FWUMDTOOL		?=	${FWUMDTOOLPATH}/fwumd_tool.py
 
 # Variables for use with sptool
 SPTOOLPATH		?=	tools/sptool
@@ -585,6 +589,14 @@ ifeq (${ENABLE_PAUTH}, 1)
 # arm/common/aarch64/arm_pauth.c contains a sample platform hook to complete the
 # Pauth support. As it's not secure, it must be reimplemented for real platforms
 	BL_COMMON_SOURCES	+=	lib/extensions/pauth/pauth_helpers.S
+endif
+
+################################################################################
+# PSA Firmware Update arguments definition
+################################################################################
+ifeq (${PSA_FWU_SUPPORT},1)
+FWUMD_ARGS += --nb-fw-imgs ${NR_OF_FW_BANKS}
+FWUMD_ARGS += --nb-banks ${NR_OF_IMAGES_IN_FW_BANK}
 endif
 
 ################################################################################
@@ -1233,6 +1245,7 @@ $(eval $(call assert_booleans,\
 	COT_DESC_IN_DTB \
 	USE_SP804_TIMER \
 	PSA_FWU_SUPPORT \
+	PSA_FWU_METADATA_FW_STORE_DESC \
 	ENABLE_MPMM \
 	ENABLE_MPMM_FCONF \
 	FEATURE_DETECTION \
@@ -1405,6 +1418,7 @@ $(eval $(call add_defines,\
 	NR_OF_FW_BANKS \
 	NR_OF_IMAGES_IN_FW_BANK \
 	PSA_FWU_SUPPORT \
+	PSA_FWU_METADATA_FW_STORE_DESC \
 	ENABLE_BRBE_FOR_NS \
 	ENABLE_TRBE_FOR_NS \
 	ENABLE_SYS_REG_TRACE_FOR_NS \
@@ -1653,11 +1667,10 @@ checkpatch:		locate-checkpatch
 	for commit in `git rev-list --no-merges $$COMMON_COMMIT..HEAD`;	\
 	do								\
 		printf "\n[*] Checking style of '$$commit'\n\n";	\
-		git log --format=email "$$commit~..$$commit"		\
-			-- ${CHECK_PATHS} |				\
-			${CHECKPATCH} ${CHECKPATCH_OPTS} - || true;	\
-		git diff --format=email "$$commit~..$$commit"		\
-			-- ${CHECK_PATHS} |				\
+		( git log --format=email "$$commit~..$$commit"		\
+			-- ${CHECK_PATHS} ;				\
+		  git diff --format=email "$$commit~..$$commit"		\
+			-- ${CHECK_PATHS}; ) |				\
 			${CHECKPATCH}  ${CHECKPATCH_OPTS} - || true;	\
 	done
 

@@ -115,10 +115,10 @@ endfunc asm_assert
 
 /*
  * This function prints a string from address in r4
- * Clobber: lr, r0 - r4
+ * Clobber: lr, r0 - r4, r7
  */
 func asm_print_str
-	mov	r3, lr
+	mov	r7, lr
 1:
 	ldrb	r0, [r4], #0x1
 	cmp	r0, #0
@@ -126,20 +126,20 @@ func asm_print_str
 	bl	plat_crash_console_putc
 	b	1b
 2:
-	bx	r3
+	bx	r7
 endfunc asm_print_str
 
 /*
  * This function prints a hexadecimal number in r4.
  * In: r4 = the hexadecimal to print.
- * Clobber: lr, r0 - r3, r5
+ * Clobber: lr, r0 - r3, r5, r7
  */
 func asm_print_hex
 	mov	r5, #32  /* No of bits to convert to ascii */
 
 	/* Convert to ascii number of bits in r5 */
 asm_print_hex_bits:
-	mov	r3, lr
+	mov	r7, lr
 1:
 	sub	r5, r5, #4
 	lsr	r0, r4, r5
@@ -155,7 +155,7 @@ asm_print_hex_bits:
 	bl	plat_crash_console_putc
 	cmp	r5, #0
 	bne	1b
-	bx	r3
+	bx	r7
 endfunc asm_print_hex
 
 	/***********************************************************

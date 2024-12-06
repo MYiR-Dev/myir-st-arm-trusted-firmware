@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, STMicroelectronics - All Rights Reserved
+ * Copyright (c) 2023-2024, STMicroelectronics - All Rights Reserved
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -14,10 +14,12 @@
 	.globl	platform_mem_init
 	.globl	plat_secondary_cold_boot_setup
 	.globl	plat_is_my_cpu_primary
+	.globl	plat_my_core_pos
 	.globl	plat_crash_console_init
 	.globl	plat_crash_console_flush
 	.globl	plat_crash_console_putc
 	.globl	plat_report_exception
+	.globl	stm32_stop2_entrypoint
 
 func platform_mem_init
 	/* Nothing to do, don't need to init SYSRAM */
@@ -32,9 +34,14 @@ endfunc platform_mem_init
 	 */
 func plat_secondary_cold_boot_setup
 	dsb	sy
+1:
 	wfi
-	/* This shouldn't be reached */
-	b	.
+	/*
+	 * This shouldn't be reached, but when a debugger halts the
+	 * secondary core it causes exit from wfi.
+	 * Put back the core in wfi.
+	 */
+	b	1b
 endfunc plat_secondary_cold_boot_setup
 
 	/* ----------------------------------------------
@@ -49,6 +56,31 @@ func plat_is_my_cpu_primary
 	cset	x0, eq
 	ret
 endfunc plat_is_my_cpu_primary
+
+	/* -----------------------------------------------------------
+	 *  unsigned int plat_stm32mp_get_core_pos(u_register_t mpidr)
+	 *  Helper function to calculate the core position.
+	 *  With this function: CorePos = (ClusterId * 4) +
+	 *  				  CoreId
+	 * -----------------------------------------------------------
+	 */
+func plat_stm32mp_get_core_pos
+	and	x1, x0, #MPIDR_CPU_MASK
+	and	x0, x0, #MPIDR_CLUSTER_MASK
+	add	x0, x1, x0, LSR #6
+	ret
+endfunc plat_stm32mp_get_core_pos
+
+	/* -----------------------------------------------------
+	 *  unsigned int plat_my_core_pos(void)
+	 *  This function uses the plat_stm32mp_get_core_pos()
+	 *  definition to get the index of the calling CPU.
+	 * -----------------------------------------------------
+	 */
+func plat_my_core_pos
+	mrs	x0, mpidr_el1
+	b	plat_stm32mp_get_core_pos
+endfunc plat_my_core_pos
 
 	/* ---------------------------------------------
 	 * int plat_crash_console_init(void)
@@ -65,13 +97,13 @@ func plat_crash_console_init
 	str	x0, [x1]
 1:
 	ldr	x0, [x1]
-	ands	x2, x0, x2
+	tst	x0, #DEBUG_UART_RST_BIT
 	beq	1b
-	bic	x2, x2, #DEBUG_UART_RST_BIT
-	str	x2, [x1]
+	bic	x0, x0, #DEBUG_UART_RST_BIT
+	str	x0, [x1]
 2:
 	ldr	x0, [x1]
-	ands	x2, x0, x2
+	tst	x0, #DEBUG_UART_RST_BIT
 	bne	2b
 	/* Enable GPIOs for UART TX */
 	mov_imm	x1, (RCC_BASE + DEBUG_UART_TX_GPIO_BANK_CLK_REG)
@@ -192,3 +224,17 @@ elr_el3_str:
 far_el3_str:
 	.asciz "\nFAR_EL3: "
 #endif /* IMAGE_BL2 */
+
+#ifdef IMAGE_BL31
+func stm32_stop2_entrypoint
+	bl	plat_is_my_cpu_primary
+	cbnz	w0, 1f
+0:	wfi
+	b.ne	0b
+1:
+	adrp	x1, stm32_sec_entrypoint
+	add	x1, x1, :lo12:stm32_sec_entrypoint
+	ldr	x0, [x1]
+	br	x0
+endfunc stm32_stop2_entrypoint
+#endif /* IMAGE_BL31 */

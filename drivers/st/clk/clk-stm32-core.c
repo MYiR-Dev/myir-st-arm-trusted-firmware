@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022, STMicroelectronics - All Rights Reserved
+ * Copyright (C) 2022-2023, STMicroelectronics - All Rights Reserved
  *
  * SPDX-License-Identifier: GPL-2.0+ OR BSD-3-Clause
  */
@@ -16,6 +16,10 @@
 #include <lib/mmio.h>
 #include <lib/spinlock.h>
 
+#define TIMEOUT_US_200MS	U(200000)
+#define TIMEOUT_US_1S		U(1000000)
+#define CLKSRC_TIMEOUT		TIMEOUT_US_200MS
+
 static struct spinlock reg_lock;
 static struct spinlock refcount_lock;
 
@@ -28,7 +32,7 @@ struct stm32_clk_priv *clk_stm32_get_priv(void)
 	return stm32_clock_data;
 }
 
-static void stm32mp1_clk_lock(struct spinlock *lock)
+static void _clk_lock(struct spinlock *lock)
 {
 	if (stm32mp_lock_available()) {
 		/* Assume interrupts are masked */
@@ -36,25 +40,22 @@ static void stm32mp1_clk_lock(struct spinlock *lock)
 	}
 }
 
-static void stm32mp1_clk_unlock(struct spinlock *lock)
+static void _clk_unlock(struct spinlock *lock)
 {
 	if (stm32mp_lock_available()) {
 		spin_unlock(lock);
 	}
 }
 
-void stm32mp1_clk_rcc_regs_lock(void)
+void clk_stm32_rcc_regs_lock(void)
 {
-	stm32mp1_clk_lock(&reg_lock);
+	_clk_lock(&reg_lock);
 }
 
-void stm32mp1_clk_rcc_regs_unlock(void)
+void clk_stm32_rcc_regs_unlock(void)
 {
-	stm32mp1_clk_unlock(&reg_lock);
+	_clk_unlock(&reg_lock);
 }
-
-#define TIMEOUT_US_1S	U(1000000)
-#define OSCRDY_TIMEOUT	TIMEOUT_US_1S
 
 struct clk_oscillator_data *clk_oscillator_get_data(struct stm32_clk_priv *priv, int id)
 {
@@ -65,103 +66,14 @@ struct clk_oscillator_data *clk_oscillator_get_data(struct stm32_clk_priv *priv,
 	return &priv->osci_data[osc_id];
 }
 
-void clk_oscillator_set_bypass(struct stm32_clk_priv *priv, int id, bool digbyp, bool bypass)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	struct stm32_clk_bypass *bypass_data = osc_data->bypass;
-	uintptr_t address;
-
-	if (bypass_data == NULL) {
-		return;
-	}
-
-	address = priv->base + bypass_data->offset;
-
-	if (digbyp) {
-		mmio_setbits_32(address, BIT(bypass_data->bit_digbyp));
-	}
-
-	if (bypass || digbyp) {
-		mmio_setbits_32(address, BIT(bypass_data->bit_byp));
-	}
-}
-
-void clk_oscillator_set_css(struct stm32_clk_priv *priv, int id, bool css)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	struct stm32_clk_css *css_data = osc_data->css;
-	uintptr_t address;
-
-	if (css_data == NULL) {
-		return;
-	}
-
-	address = priv->base + css_data->offset;
-
-	if (css) {
-		mmio_setbits_32(address, BIT(css_data->bit_css));
-	}
-}
-
-void clk_oscillator_set_drive(struct stm32_clk_priv *priv, int id, uint8_t lsedrv)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	struct stm32_clk_drive *drive_data = osc_data->drive;
-	uintptr_t address;
-	uint32_t mask;
-	uint32_t value;
-
-	if (drive_data == NULL) {
-		return;
-	}
-
-	address = priv->base + drive_data->offset;
-
-	mask = (BIT(drive_data->drv_width) - 1U) <<  drive_data->drv_shift;
-
-	/*
-	 * Warning: not recommended to switch directly from "high drive"
-	 * to "medium low drive", and vice-versa.
-	 */
-	value = (mmio_read_32(address) & mask) >> drive_data->drv_shift;
-
-	while (value != lsedrv) {
-		if (value > lsedrv) {
-			value--;
-		} else {
-			value++;
-		}
-
-		mmio_clrsetbits_32(address, mask, value << drive_data->drv_shift);
-	}
-}
-
-int clk_oscillator_wait_ready(struct stm32_clk_priv *priv, int id, bool ready_on)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	return _clk_stm32_gate_wait_ready(priv, osc_data->gate_rdy_id, ready_on);
-}
-
-int clk_oscillator_wait_ready_on(struct stm32_clk_priv *priv, int id)
-{
-	return clk_oscillator_wait_ready(priv, id, true);
-}
-
-int clk_oscillator_wait_ready_off(struct stm32_clk_priv *priv, int id)
-{
-	return clk_oscillator_wait_ready(priv, id, false);
-}
-
 static int clk_gate_enable(struct stm32_clk_priv *priv, int id)
 {
 	const struct clk_stm32 *clk = _clk_get(priv, id);
 	struct clk_gate_cfg *cfg = clk->clock_cfg;
 
 	mmio_setbits_32(priv->base + cfg->offset, BIT(cfg->bit_idx));
+
+	dsb(); /* Make sure the clock is enabled.  */
 
 	return 0;
 }
@@ -171,7 +83,11 @@ static void clk_gate_disable(struct stm32_clk_priv *priv, int id)
 	const struct clk_stm32 *clk = _clk_get(priv, id);
 	struct clk_gate_cfg *cfg = clk->clock_cfg;
 
+	dsb(); /* Ensure prebious transaction are performed before stop.  */
+
 	mmio_clrbits_32(priv->base + cfg->offset, BIT(cfg->bit_idx));
+
+	dsb(); /* Make sure the clock is disabled.  */
 }
 
 static bool clk_gate_is_enabled(struct stm32_clk_priv *priv, int id)
@@ -224,6 +140,15 @@ const struct clk_stm32 *_clk_get(struct stm32_clk_priv *priv, int id)
 	return NULL;
 }
 
+static const struct stm32_clk_ops *_clk_get_ops(struct stm32_clk_priv *priv, int id)
+{
+	const struct clk_stm32 *clk = _clk_get(priv, id);
+
+	assert (clk->ops != NO_OPS);
+
+	return priv->ops_array[clk->ops];
+}
+
 #define clk_div_mask(_width) GENMASK(((_width) - 1U), 0U)
 
 static unsigned int _get_table_div(const struct clk_div_table *table,
@@ -262,9 +187,6 @@ static unsigned int _get_div(const struct clk_div_table *table,
 
 	return val + 1U;
 }
-
-#define TIMEOUT_US_200MS	U(200000)
-#define CLKSRC_TIMEOUT		TIMEOUT_US_200MS
 
 int clk_mux_set_parent(struct stm32_clk_priv *priv, uint16_t pid, uint8_t sel)
 {
@@ -377,7 +299,7 @@ int _clk_stm32_set_parent_by_index(struct stm32_clk_priv *priv, int clk, int sel
 
 int _clk_stm32_get_parent(struct stm32_clk_priv *priv, int clk_id)
 {
-	const struct clk_stm32 *clk = _clk_get(priv, clk_id);
+	const struct stm32_clk_ops *ops = _clk_get_ops(priv, clk_id);
 	const struct parent_cfg *parent;
 	uint16_t mux_id;
 	int sel;
@@ -394,8 +316,8 @@ int _clk_stm32_get_parent(struct stm32_clk_priv *priv, int clk_id)
 	mux_id &= MUX_PARENT_MASK;
 	parent = &priv->parents[mux_id];
 
-	if (clk->ops->get_parent != NULL) {
-		sel = clk->ops->get_parent(priv, clk_id);
+	if (ops->get_parent != NULL) {
+		sel = ops->get_parent(priv, clk_id);
 	} else {
 		sel = clk_mux_get_parent(priv, mux_id);
 	}
@@ -464,7 +386,7 @@ int clk_get_index(struct stm32_clk_priv *priv, unsigned long binding_id)
 
 unsigned long _clk_stm32_get_rate(struct stm32_clk_priv *priv, int id)
 {
-	const struct clk_stm32 *clk = _clk_get(priv, id);
+	const struct stm32_clk_ops *ops = _clk_get_ops(priv, id);
 	int parent;
 
 	if ((unsigned int)id >= priv->num) {
@@ -476,14 +398,14 @@ unsigned long _clk_stm32_get_rate(struct stm32_clk_priv *priv, int id)
 		return 0UL;
 	}
 
-	if (clk->ops->recalc_rate != NULL) {
+	if (ops->recalc_rate != NULL) {
 		unsigned long prate = 0UL;
 
 		if (parent != CLK_IS_ROOT) {
 			prate = _clk_stm32_get_rate(priv, parent);
 		}
 
-		return clk->ops->recalc_rate(priv, id, prate);
+		return ops->recalc_rate(priv, id, prate);
 	}
 
 	if (parent == CLK_IS_ROOT) {
@@ -520,10 +442,10 @@ bool _stm32_clk_is_flags(struct stm32_clk_priv *priv, int id, uint8_t flag)
 
 int clk_stm32_enable_call_ops(struct stm32_clk_priv *priv, uint16_t id)
 {
-	const struct clk_stm32 *clk = _clk_get(priv, id);
+	const struct stm32_clk_ops *ops = _clk_get_ops(priv, id);
 
-	if (clk->ops->enable != NULL) {
-		clk->ops->enable(priv, id);
+	if (ops->enable != NULL) {
+		ops->enable(priv, id);
 	}
 
 	return 0;
@@ -550,7 +472,7 @@ static int _clk_stm32_enable_core(struct stm32_clk_priv *priv, int id)
 
 	priv->gate_refcounts[id]++;
 
-	if (priv->gate_refcounts[id] == UINT_MAX) {
+	if (priv->gate_refcounts[id] == UINT8_MAX) {
 		ERROR("%s: %d max enable count !", __func__, id);
 		panic();
 	}
@@ -562,19 +484,19 @@ int _clk_stm32_enable(struct stm32_clk_priv *priv, int id)
 {
 	int ret;
 
-	stm32mp1_clk_lock(&refcount_lock);
+	_clk_lock(&refcount_lock);
 	ret = _clk_stm32_enable_core(priv, id);
-	stm32mp1_clk_unlock(&refcount_lock);
+	_clk_unlock(&refcount_lock);
 
 	return ret;
 }
 
 void clk_stm32_disable_call_ops(struct stm32_clk_priv *priv, uint16_t id)
 {
-	const struct clk_stm32 *clk = _clk_get(priv, id);
+	const struct stm32_clk_ops *ops = _clk_get_ops(priv, id);
 
-	if (clk->ops->disable != NULL) {
-		clk->ops->disable(priv, id);
+	if (ops->disable != NULL) {
+		ops->disable(priv, id);
 	}
 }
 
@@ -610,19 +532,19 @@ static void _clk_stm32_disable_core(struct stm32_clk_priv *priv, int id)
 
 void _clk_stm32_disable(struct stm32_clk_priv *priv, int id)
 {
-	stm32mp1_clk_lock(&refcount_lock);
+	_clk_lock(&refcount_lock);
 
 	_clk_stm32_disable_core(priv, id);
 
-	stm32mp1_clk_unlock(&refcount_lock);
+	_clk_unlock(&refcount_lock);
 }
 
 bool _clk_stm32_is_enabled(struct stm32_clk_priv *priv, int id)
 {
-	const struct clk_stm32 *clk = _clk_get(priv, id);
+	const struct stm32_clk_ops *ops = _clk_get_ops(priv, id);
 
-	if (clk->ops->is_enabled != NULL) {
-		return clk->ops->is_enabled(priv, id);
+	if (ops->is_enabled != NULL) {
+		return ops->is_enabled(priv, id);
 	}
 
 	return priv->gate_refcounts[id];
@@ -804,7 +726,7 @@ int _clk_stm32_gate_wait_ready(struct stm32_clk_priv *priv, uint16_t gate_id,
 		mask_test = 0U;
 	}
 
-	timeout = timeout_init_us(OSCRDY_TIMEOUT);
+	timeout = timeout_init_us(TIMEOUT_US_1S);
 
 	while ((mmio_read_32(address) & mask_rdy) != mask_test) {
 		if (timeout_elapsed(timeout)) {
@@ -937,110 +859,6 @@ const struct stm32_clk_ops clk_stm32_fixed_rate_ops = {
 	.recalc_rate	= clk_fixed_rate_recalc,
 };
 
-static unsigned long clk_stm32_osc_recalc_rate(struct stm32_clk_priv *priv,
-					       int id, unsigned long prate)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	return osc_data->frequency;
-};
-
-bool clk_stm32_osc_gate_is_enabled(struct stm32_clk_priv *priv, int id)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	return _clk_stm32_gate_is_enabled(priv, osc_data->gate_id);
-
-}
-
-int clk_stm32_osc_gate_enable(struct stm32_clk_priv *priv, int id)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	_clk_stm32_gate_enable(priv, osc_data->gate_id);
-
-	if (_clk_stm32_gate_wait_ready(priv, osc_data->gate_rdy_id, true) != 0U) {
-		ERROR("%s: %s (%d)\n", __func__, osc_data->name, __LINE__);
-		panic();
-	}
-
-	return 0;
-}
-
-void clk_stm32_osc_gate_disable(struct stm32_clk_priv *priv, int id)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-
-	_clk_stm32_gate_disable(priv, osc_data->gate_id);
-
-	if (_clk_stm32_gate_wait_ready(priv, osc_data->gate_rdy_id, false) != 0U) {
-		ERROR("%s: %s (%d)\n", __func__, osc_data->name, __LINE__);
-		panic();
-	}
-}
-
-static unsigned long clk_stm32_get_dt_oscillator_frequency(const char *name)
-{
-	void *fdt = NULL;
-	int node = 0;
-	int subnode = 0;
-
-	if (fdt_get_address(&fdt) == 0) {
-		panic();
-	}
-
-	node = fdt_path_offset(fdt, "/clocks");
-	if (node < 0) {
-		return 0UL;
-	}
-
-	fdt_for_each_subnode(subnode, fdt, node) {
-		const char *cchar = NULL;
-		const fdt32_t *cuint = NULL;
-		int ret = 0;
-
-		cchar = fdt_get_name(fdt, subnode, &ret);
-		if (cchar == NULL) {
-			continue;
-		}
-
-		if (strncmp(cchar, name, (size_t)ret) ||
-		    fdt_get_status(subnode) == DT_DISABLED) {
-			continue;
-		}
-
-		cuint = fdt_getprop(fdt, subnode, "clock-frequency", &ret);
-		if (cuint == NULL) {
-			return 0UL;
-		}
-
-		return fdt32_to_cpu(*cuint);
-	}
-
-	return 0UL;
-}
-
-void clk_stm32_osc_init(struct stm32_clk_priv *priv, int id)
-{
-	struct clk_oscillator_data *osc_data = clk_oscillator_get_data(priv, id);
-	const char *name = osc_data->name;
-
-	osc_data->frequency = clk_stm32_get_dt_oscillator_frequency(name);
-}
-
-const struct stm32_clk_ops clk_stm32_osc_ops = {
-	.recalc_rate	= clk_stm32_osc_recalc_rate,
-	.is_enabled	= clk_stm32_osc_gate_is_enabled,
-	.enable		= clk_stm32_osc_gate_enable,
-	.disable	= clk_stm32_osc_gate_disable,
-	.init		= clk_stm32_osc_init,
-};
-
-const struct stm32_clk_ops clk_stm32_osc_nogate_ops = {
-	.recalc_rate	= clk_stm32_osc_recalc_rate,
-	.init		= clk_stm32_osc_init,
-};
-
 int stm32_clk_parse_fdt_by_name(void *fdt, int node, const char *name, uint32_t *tab, uint32_t *nb)
 {
 	const fdt32_t *cell;
@@ -1073,12 +891,10 @@ int clk_stm32_init(struct stm32_clk_priv *priv, uintptr_t base)
 	priv->base = base;
 
 	for (i = 0U; i < priv->num; i++) {
-		const struct clk_stm32 *clk = _clk_get(priv, i);
+		const struct stm32_clk_ops *ops = _clk_get_ops(priv, i);
 
-		assert(clk->ops != NULL);
-
-		if (clk->ops->init != NULL) {
-			clk->ops->init(priv, i);
+		if (ops->init != NULL) {
+			ops->init(priv, i);
 		}
 	}
 

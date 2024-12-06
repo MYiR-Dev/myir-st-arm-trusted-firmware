@@ -8,6 +8,7 @@
 #define PLATFORM_DEF_H
 
 #include <arch.h>
+#include <drivers/arm/gic_common.h>
 #include <lib/utils_def.h>
 #include <plat/common/common_def.h>
 
@@ -32,9 +33,9 @@
 #define PLATFORM_CORE_COUNT		U(2)
 #define PLATFORM_MAX_CPUS_PER_CLUSTER	U(2)
 
-#define PLAT_MAX_PWR_LVL		U(5)
-#define PLAT_MAX_CPU_SUSPEND_PWR_LVL	U(5)
-#define PLAT_NUM_PWR_DOMAINS		U(7)
+#define PLAT_MAX_PWR_LVL		U(4)
+#define PLAT_MIN_SUSPEND_PWR_LVL	U(2)
+#define PLAT_NUM_PWR_DOMAINS		U(6)
 
 /* Local power state for power domains in Run state. */
 #define STM32MP_LOCAL_STATE_RUN		U(0)
@@ -61,10 +62,49 @@
 #define BL2_LIMIT			(STM32MP_BL2_BASE + \
 					 STM32MP_BL2_SIZE)
 
+#define BL2_RO_BASE			STM32MP_BL2_RO_BASE
+#define BL2_RO_LIMIT			(STM32MP_BL2_RO_BASE + \
+					 STM32MP_BL2_RO_SIZE)
+
+#define BL2_RW_BASE			STM32MP_BL2_RW_BASE
+#define BL2_RW_LIMIT			(STM32MP_BL2_RW_BASE + \
+					 STM32MP_BL2_RW_SIZE)
+
+/*******************************************************************************
+ * BL31 specific defines.
+ ******************************************************************************/
+#define BL31_BASE			0
+#define BL31_LIMIT			(STM32MP_SEC_SYSRAM_SIZE / 2)
+
 /*******************************************************************************
  * BL33 specific defines.
  ******************************************************************************/
 #define BL33_BASE			STM32MP_BL33_BASE
+
+/*
+ * Load address of BL33 for this platform port
+ */
+#define PLAT_STM32MP_NS_IMAGE_OFFSET	BL33_BASE
+
+/* Needed by STM32CubeProgrammer support */
+#define DWL_BUFFER_SIZE			U(0x01000000)
+#if STM32MP_DDR_FIP_IO_STORAGE
+#define DWL_DDR_BUFFER_BASE		STM32MP_SYSRAM_BASE
+#define DWL_DDR_BUFFER_SIZE		U(0x0000A000)
+#endif
+
+/*
+ * SSBL offset in case it's stored in eMMC boot partition.
+ * We can fix it to 256K because TF-A size can't be bigger than SRAM
+ */
+#define PLAT_EMMC_BOOT_SSBL_OFFSET		U(0x40000)
+
+/*******************************************************************************
+ * DTB specific defines.
+ ******************************************************************************/
+#define DTB_BASE			STM32MP_DTB_BASE
+#define DTB_LIMIT			(STM32MP_DTB_BASE + \
+					 STM32MP_DTB_SIZE)
 
 /*******************************************************************************
  * Platform specific page table and MMU setup constants
@@ -83,5 +123,60 @@
  ******************************************************************************/
 #define CACHE_WRITEBACK_SHIFT		6
 #define CACHE_WRITEBACK_GRANULE		(U(1) << CACHE_WRITEBACK_SHIFT)
+
+/*
+ * Secure Interrupt: based on the standard ARM mapping
+ */
+#define ARM_IRQ_SEC_PHY_TIMER		U(29)
+
+#define ARM_IRQ_NON_SEC_SGI_0		U(0)
+
+#define ARM_IRQ_SEC_SGI_0		U(8)
+#define ARM_IRQ_SEC_SGI_1		U(9)
+#define ARM_IRQ_SEC_SGI_2		U(10)
+#define ARM_IRQ_SEC_SGI_3		U(11)
+#define ARM_IRQ_SEC_SGI_4		U(12)
+#define ARM_IRQ_SEC_SGI_5		U(13)
+#define ARM_IRQ_SEC_SGI_6		U(14)
+#define ARM_IRQ_SEC_SGI_7		U(15)
+
+/* Platform IRQ Priority */
+#define STM32MP_IRQ_SEC_SPI_PRIO	U(0x10)
+
+/*
+ * Define a list of Group 1 Secure and Group 0 interrupts as per GICv3
+ * terminology. On a GICv2 system or mode, the lists will be merged and treated
+ * as Group 0 interrupts.
+ */
+#define PLATFORM_G1S_PROPS(grp) \
+	INTR_PROP_DESC(ARM_IRQ_SEC_PHY_TIMER,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_LEVEL),	\
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_1,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE),	\
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_2,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE),	\
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_3,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE),	\
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_4,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE),	\
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_5,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE),	\
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_7,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE)
+
+#define PLATFORM_G0_PROPS(grp) \
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_0,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE),	\
+	INTR_PROP_DESC(ARM_IRQ_SEC_SGI_6,		\
+		       GIC_HIGHEST_SEC_PRIORITY,	\
+		       (grp), GIC_INTR_CFG_EDGE)
 
 #endif /* PLATFORM_DEF_H */

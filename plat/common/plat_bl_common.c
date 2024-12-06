@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2020, ARM Limited and Contributors. All rights reserved.
+ * Copyright (c) 2018-2023, Arm Limited and Contributors. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -25,6 +25,7 @@
 #pragma weak bl2_plat_handle_pre_image_load
 #pragma weak bl2_plat_handle_post_image_load
 #pragma weak plat_try_next_boot_source
+#pragma weak plat_try_backup_partitions
 #pragma weak plat_get_enc_key_info
 #pragma weak plat_is_smccc_feature_available
 #pragma weak plat_get_soc_version
@@ -70,6 +71,11 @@ int bl2_plat_handle_post_image_load(unsigned int image_id)
 }
 
 int plat_try_next_boot_source(void)
+{
+	return 0;
+}
+
+int plat_try_backup_partitions(unsigned int image_id)
 {
 	return 0;
 }

@@ -42,17 +42,17 @@ static inline void print_pmic_info_and_debug(void)
 #endif
 
 /*
- * pmic_ddr_power_init - Initialize regulators required for DDR
- *
- * Returns 0 on success, and negative values on errors
- */
-int pmic_ddr_power_init(enum ddr_type ddr_type);
-
-/*
  * pmic_voltages_init - Update voltages for platform init
  *
  * Returns 0 on success, and negative values on errors
  */
 int pmic_voltages_init(void);
+
+/*
+ * pmic_switch_off - switch off the platform with PMIC
+ *
+ * Panics on errors
+ */
+void pmic_switch_off(void);
 
 #endif /* STM32MP_PMIC_H */

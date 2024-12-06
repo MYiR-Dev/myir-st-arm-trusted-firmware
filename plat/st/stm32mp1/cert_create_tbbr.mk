@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2022, STMicroelectronics - All Rights Reserved
+# Copyright (c) 2022-2023, STMicroelectronics - All Rights Reserved
 #
 # SPDX-License-Identifier: BSD-3-Clause
 #
@@ -7,6 +7,7 @@
 # Override TBBR Cert to update generic certificate
 
 $(eval $(call add_define,PDEF_CERTS))
+$(eval $(call add_define,PDEF_EXTS))
 
 PLAT_INCLUDE	+= -I${PLAT_DIR}include
 

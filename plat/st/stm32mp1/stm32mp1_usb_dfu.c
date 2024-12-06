@@ -129,7 +129,11 @@ static const uint8_t usb_stm32mp1_config_desc[USB_DFU_CONFIG_DESC_SIZ] = {
 /* The user strings: one by alternate as defined in USBD_DFU_IF_DESC */
 #if STM32MP13
 const char *const if_desc_string[USB_DFU_ITF_NUM] = {
+#if STM32MP_SSP
+	"@SSP /0xF3/1*512Ba",
+#else
 	"@SSBL /0x03/1*16Me",
+#endif
 	"@virtual /0xF1/1*512Ba"
 };
 #endif
@@ -176,31 +180,15 @@ static void stm32mp1_get_string(const char *desc, uint8_t *unicode, uint16_t *le
  */
 static void update_serial_num_string(void)
 {
-	uint8_t i;
 	char serial_string[SIZ_STRING_SERIAL + 2U];
 	/* serial number is set to 0 */
 	uint32_t deviceserial[UID_WORD_NB] = {0U, 0U, 0U};
-	uint32_t otp;
-	uint32_t len;
 	uint16_t length;
 
-	if (stm32_get_otp_index(UID_OTP, &otp, &len) != 0) {
-		ERROR("BSEC: Get UID_OTP number Error\n");
+	if (stm32_get_uid_otp(deviceserial) != 0) {
 		return;
 	}
 
-	if ((len / __WORD_BIT) != UID_WORD_NB) {
-		ERROR("BSEC: Get UID_OTP length Error\n");
-		return;
-	}
-
-	for (i = 0; i < UID_WORD_NB; i++) {
-		if (bsec_shadow_read_otp(&deviceserial[i], i + otp) !=
-		    BSEC_OK) {
-			ERROR("BSEC: UID%d Error\n", i);
-			return;
-		}
-	}
 	/* build serial number with OTP value as in ROM code */
 	snprintf(serial_string, sizeof(serial_string), "%08X%08X%08X",
 		 deviceserial[0], deviceserial[1], deviceserial[2]);
@@ -400,13 +388,22 @@ uint8_t usb_dfu_get_phase(uint8_t alt)
 	switch (alt) {
 #if STM32MP13
 	case 0:
+#if STM32MP_SSP
+		ret = PHASE_SSP;
+#else
 		ret = PHASE_SSBL;
+#endif
 		break;
 	case 1:
 		ret = PHASE_CMD;
 		break;
 #endif
 #if STM32MP15
+#if STM32MP_SSP
+	case 0:
+		ret =  PHASE_SSP;
+		break;
+#endif
 	case 3:
 		ret = PHASE_SSBL;
 		break;

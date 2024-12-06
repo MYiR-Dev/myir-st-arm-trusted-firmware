@@ -10,17 +10,6 @@
 #include <common/debug.h>
 #include <drivers/usb_device.h>
 
-/* Define for EP address */
-#define EP_DIR_MASK		BIT(7)
-#define EP_DIR_IN		BIT(7)
-#define EP_NUM_MASK		GENMASK(3, 0)
-
-#define EP0_IN			(0U | EP_DIR_IN)
-#define EP0_OUT			0U
-
-/* USB address between 1 through 127 = 0x7F mask */
-#define ADDRESS_MASK		GENMASK(6, 0)
-
 /*
  * Set a STALL condition over an endpoint
  * pdev: USB handle
@@ -47,7 +36,7 @@ static enum usb_status usb_core_set_stall(struct usb_handle *pdev, uint8_t ep_ad
 	ep->num = num;
 
 	pdev->driver->ep_set_stall(hpcd->instance, ep);
-	if (num == 0U) {
+	if (ep_addr == EP0_OUT) {
 		pdev->driver->ep0_out_start(hpcd->instance);
 	}
 
@@ -711,7 +700,11 @@ enum usb_status usb_core_receive_ep0(struct usb_handle *pdev, uint8_t *buf,
 	}
 
 	pdev->ep_out[0].total_length = len;
+#ifdef USB_CORE_AVOID_PACKET_SPLIT_MPS
+	pdev->ep_out[0].rem_length = 0;
+#else
 	pdev->ep_out[0].rem_length = len;
+#endif
 
 	/* Start the transfer */
 	return usb_core_receive(pdev, 0U, buf, len);
@@ -736,7 +729,11 @@ enum usb_status usb_core_transmit_ep0(struct usb_handle *pdev, uint8_t *buf,
 	}
 
 	pdev->ep_in[0].total_length = len;
+#ifdef USB_CORE_AVOID_PACKET_SPLIT_MPS
+	pdev->ep_in[0].rem_length = 0;
+#else
 	pdev->ep_in[0].rem_length = len;
+#endif
 
 	/* Start the transfer */
 	return usb_core_transmit(pdev, 0U, buf, len);
