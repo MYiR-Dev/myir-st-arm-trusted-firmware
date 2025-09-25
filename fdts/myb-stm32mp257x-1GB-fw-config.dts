@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * Copyright (c) 2024, MYiR - All Rights Reserved
+ */
+
+ #include "stm32mp25-fw-config.dtsi"
+ #include "myb-stm32mp257x-fw-config.dtsi"
+ 
