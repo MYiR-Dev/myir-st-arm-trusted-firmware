@@ -201,7 +201,7 @@
 };
 
 &pka {
-	status = "disabled";
+	status = "okay";
 };
 
 &rng {
@@ -209,7 +209,7 @@
 };
 
 &saes {
-	status = "disabled";
+	status = "okay";
 };
 
 &sdmmc1 {
