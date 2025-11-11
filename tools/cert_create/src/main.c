@@ -291,7 +291,11 @@ static const cmd_opt_t common_cmd_opt[] = {
 	{
 		{ "print-cert", no_argument, NULL, 'p' },
 		"Print the certificates in the standard output"
-	}
+	},
+	{
+               { "rot-key-pwd", required_argument, NULL, 'r' },
+               "Password for the root key"
+        }
 };
 
 int main(int argc, char *argv[])
@@ -310,6 +314,7 @@ int main(int argc, char *argv[])
 	unsigned char md[SHA512_DIGEST_LENGTH];
 	unsigned int  md_len;
 	const EVP_MD *md_info;
+	char *rot_key_pw = NULL;
 
 	NOTICE("CoT Generation Tool: %s\n", build_msg);
 	NOTICE("Target platform: %s\n", platform_msg);
@@ -347,7 +352,7 @@ int main(int argc, char *argv[])
 
 	while (1) {
 		/* getopt_long stores the option index here. */
-		c = getopt_long(argc, argv, "a:b:hknps:", cmd_opt, &opt_idx);
+		c = getopt_long(argc, argv, "a:b:hknpsr:", cmd_opt, &opt_idx);
 
 		/* Detect the end of the options. */
 		if (c == -1) {
@@ -381,6 +386,10 @@ int main(int argc, char *argv[])
 		case 'p':
 			print_cert = 1;
 			break;
+               case 'r':
+                       rot_key_pw = malloc(sizeof(char) * strlen(optarg) + 1);
+                       strncpy(rot_key_pw, optarg, strlen(optarg) + 1);
+                       break;
 		case 's':
 			hash_alg = get_hash_alg(optarg);
 			if (hash_alg < 0) {
@@ -441,7 +450,7 @@ int main(int argc, char *argv[])
 #endif
 
 		/* First try to load the key from disk */
-		err_code = key_load(&keys[i]);
+		err_code = key_load(&keys[i], rot_key_pw);
 		if (err_code == KEY_ERR_NONE) {
 			/* Key loaded successfully */
 			continue;

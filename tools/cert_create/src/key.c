@@ -239,7 +239,7 @@ err:
 
 }
 
-unsigned int key_load(key_t *key)
+unsigned int key_load(key_t *key, char *rot_key_pwd)
 {
 	if (key->fn == NULL) {
 		VERBOSE("Key not specified\n");
@@ -257,7 +257,7 @@ unsigned int key_load(key_t *key)
 			return KEY_ERR_OPEN;
 		}
 
-		key->key = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
+		key->key = PEM_read_PrivateKey(fp, NULL, NULL, rot_key_pwd);
 		fclose(fp);
 	}
 

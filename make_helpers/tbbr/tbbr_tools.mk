@@ -25,6 +25,7 @@
 #   KEY_SIZE
 #   ROT_KEY
 #   PROT_KEY
+#   ROT_KEY_PWD
 #   PLAT_KEY
 #   SWD_ROT_KEY
 #   CORE_SWD_KEY
@@ -78,6 +79,7 @@ $(if ${HASH_ALG},$(eval $(call CERT_ADD_CMD_OPT,${HASH_ALG},--hash-alg,FWU_)))
 $(if ${ROT_KEY},$(eval $(call CERT_ADD_CMD_OPT,${ROT_KEY},--rot-key)))
 $(if ${ROT_KEY},$(eval $(call CERT_ADD_CMD_OPT,${ROT_KEY},--rot-key,FWU_)))
 $(if ${PROT_KEY},$(eval $(call CERT_ADD_CMD_OPT,${PROT_KEY},--prot-key)))
+$(if ${ROT_KEY_PWD},$(eval $(call CERT_ADD_CMD_OPT,${ROT_KEY_PWD},--rot-key-pwd)))
 $(if ${PLAT_KEY},$(eval $(call CERT_ADD_CMD_OPT,${PLAT_KEY},--plat-key)))
 $(if ${SWD_ROT_KEY},$(eval $(call CERT_ADD_CMD_OPT,${SWD_ROT_KEY},--swd-rot-key)))
 $(if ${CORE_SWD_KEY},$(eval $(call CERT_ADD_CMD_OPT,${CORE_SWD_KEY},--core-swd-key)))
