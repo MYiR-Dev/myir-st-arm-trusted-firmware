@@ -647,6 +647,7 @@ uint32_t stm32_get_and_dec_fwu_trial_boot_cnt(void)
 		stm32_nvmem_cell_clrset(&fwu_info_cell, FWU_INFO_CNT_MSK,
 					(try_cnt - 1U) << FWU_INFO_CNT_OFF);
 	}
+	NOTICE("!!demo log : fwu bootcount %u\n", try_cnt);
 
 	return try_cnt;
 }
