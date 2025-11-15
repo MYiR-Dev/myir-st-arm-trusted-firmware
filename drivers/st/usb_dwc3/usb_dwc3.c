@@ -940,12 +940,24 @@ static enum usb_status dwc3_ep_stop_xfer(dwc3_handle_t *dwc3_handle, struct usbd
 	return ret;
 }
 
+static enum usb_status dwc3_ep_set_stall(dwc3_handle_t *dwc3_handle,
+					 const usb_dwc3_endpoint_t *dwc3_ep)
+{
+	dwc3_epcmd_params_t params;
+
+	(void)memset(&params, 0x00, sizeof(params));
+
+	return dwc3_execute_dep_cmd(dwc3_handle, dwc3_ep->phy_epnum, USB_DWC3_DEPCMD_SETSTALL,
+				    &params);
+}
+
 static enum usb_status usb_dwc3_stop_device(void *handle)
 {
 	dwc3_handle_t *dwc3_handle = (dwc3_handle_t *)handle;
 	uint64_t timeout;
 	uint8_t i;
 	uint32_t evtcnt;
+	enum usb_status ret;
 
 	/*
 	 * Stop transfers for all(USB_DWC3_NUM_IN_EPS) EP
@@ -958,6 +970,11 @@ static enum usb_status usb_dwc3_stop_device(void *handle)
 	/* Stop transfers for all EP except EP0OUT k = USB_DWC3_NUM_OUT_EP */
 	for (i = 0; i < USB_DWC3_NUM_OUT_EP; i++) {
 		dwc3_ep_stop_xfer(dwc3_handle, &dwc3_handle->pcd_handle->out_ep[i]);
+	}
+
+	ret = dwc3_ep_set_stall(dwc3_handle, &dwc3_handle->OUT_ep[0]);
+	if (ret != USBD_OK) {
+		ERROR("%s: EP0 stall failed %u\n", __func__, ret);
 	}
 
 	/*
@@ -1016,16 +1033,6 @@ static enum usb_status usb_dwc3_set_address(void *handle, uint8_t address)
 static enum usb_status usb_dwc3_ep0_start_xfer(void *handle, struct usbd_ep *ep)
 {
 	return usb_dwc3_ep_start_xfer(handle, ep);
-}
-
-static enum usb_status dwc3_ep_set_stall(dwc3_handle_t *dwc3_handle, usb_dwc3_endpoint_t *dwc3_ep)
-{
-	dwc3_epcmd_params_t params;
-
-	(void)memset(&params, 0x00, sizeof(params));
-
-	return dwc3_execute_dep_cmd(dwc3_handle, dwc3_ep->phy_epnum, USB_DWC3_DEPCMD_SETSTALL,
-				    &params);
 }
 
 static enum usb_status usb_dwc3_ep_set_stall(void *handle, struct usbd_ep *ep)
@@ -2299,13 +2306,11 @@ void usb_dwc3_init_driver(struct usb_handle *usb_core_handle, struct pcd_handle 
 	for (i = 0; i < USB_DWC3_INT_INUSE; i++) {
 		__HAL_PCD_DISABLE_INTR(dwc3_handle, i);
 	}
-
 	/* Init the Core (common init.) */
 	ret = dwc3_core_init(dwc3_handle, USBPHY_UTMI);
 	if (ret != USBD_OK) {
 		panic();
 	}
-
 	/* Init endpoints structures */
 	for (i = 0; i < USB_DWC3_NUM_IN_EP ; i++) {
 		/* Init ep structure */
@@ -2325,7 +2330,6 @@ void usb_dwc3_init_driver(struct usb_handle *usb_core_handle, struct pcd_handle 
 
 		dwc3_handle->IN_ep[i].intr_num = PCD_DEV_EVENTS_INTR;
 	}
-
 	for (i = 0; i < USB_DWC3_NUM_OUT_EP ; i++) {
 		/* Init ep structure */
 		pcd_handle->out_ep[i].is_in = false;
@@ -2346,7 +2350,6 @@ void usb_dwc3_init_driver(struct usb_handle *usb_core_handle, struct pcd_handle 
 
 		dwc3_handle->OUT_ep[i].bounce_buf = dwc3_handle->bounce_bufs[i].bounce_buf;
 	}
-
 #define PHYS_AREA	STM32MP_USB_DWC3_BASE
 
 #define EVTBUF_AREA_OFFSET	0U
@@ -2360,14 +2363,12 @@ void usb_dwc3_init_driver(struct usb_handle *usb_core_handle, struct pcd_handle 
 #define TRB_OUT_AREA	(coh_area + TRB_OUT_AREA_OFFSET)
 #define TRB_IN_AREA	(coh_area + TRB_IN_AREA_OFFSET)
 #define SETUP_AREA	(coh_area + SETUP_AREA_OFFSET)
-
 	dwc3_handle->setup_dma_addr = (uintptr_t)api_getdmaaddr((void *)SETUP_AREA,
 								USB_SETUP_PACKET_SIZE, 1);
 	assert(dwc3_handle->setup_dma_addr != 0U);
 
 	dwc3_handle->setup_addr = SETUP_AREA;
 	assert(dwc3_handle->setup_addr != NULL);
-
 	/* Map DMA and Coherent address for event buffers k = USB_DWC3_INT_INUSE */
 	for (i = 0; i < USB_DWC3_INT_INUSE; i++) {
 		dwc3_handle->intbuffers.evtbuffer_dma_addr[i] =
@@ -2378,13 +2379,11 @@ void usb_dwc3_init_driver(struct usb_handle *usb_core_handle, struct pcd_handle 
 		assert(dwc3_handle->intbuffers.evtbuffer_addr[i] != NULL);
 
 		dwc3_handle->intbuffers.evtbufferpos[i] = 0;
-
 		INFO("EventBuffer%u: BuffArea=%lx DmaAddr=%08x CoherentMapAddr=%p\n", i,
 			   (PHYS_AREA + EVTBUF_AREA_OFFSET),
 			   (uint32_t)dwc3_handle->intbuffers.evtbuffer_dma_addr[i],
 			   dwc3_handle->intbuffers.evtbuffer_addr[i]);
 	}
-
 	/* MAP TRB Coherent and DMA address for EP0IN and EP0OUT */
 	dwc3_handle->IN_ep[0].trb_dma_addr = (uint32_t)api_getdmaaddr((void *)TRB_IN_AREA,
 								      sizeof(usb_dwc3_trb_t), 1);
