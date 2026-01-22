@@ -709,6 +709,7 @@ int stm32_get_and_dec_fwu_trial_boot_cnt(uint32_t *cnt)
 		}
 	}
 
+	NOTICE("!!demo log : fwu bootcount %u\n", try_cnt);
 	*cnt = try_cnt;
 
 	return 0;

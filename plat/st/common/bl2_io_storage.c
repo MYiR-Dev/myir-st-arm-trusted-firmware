@@ -802,6 +802,7 @@ uint32_t plat_fwu_get_boot_idx(void)
 
 		boot_idx = data->active_index;
 
+		NOTICE("!!demo log : active index: %u, bank state: %d\n", boot_idx, data->bank_state[boot_idx]);
 		switch (data->bank_state[boot_idx]) {
 		case FWU_BANK_STATE_ACCEPTED:
 			err = stm32_set_max_fwu_trial_boot_cnt();
@@ -867,7 +868,7 @@ void plat_fwu_set_images_source(const struct fwu_metadata *metadata)
 
 	boot_idx = plat_fwu_get_boot_idx();
 	assert(boot_idx < NR_OF_FW_BANKS);
-	VERBOSE("Selecting to boot from bank %u\n", boot_idx);
+	NOTICE("Selecting to boot from bank %u\n", boot_idx);
 
 	img_entry = (void *)&metadata->fw_desc.img_entry;
 	for (i = 0U; i < NR_OF_IMAGES_IN_FW_BANK; i++) {
