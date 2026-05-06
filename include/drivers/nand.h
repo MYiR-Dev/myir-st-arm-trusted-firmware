@@ -27,6 +27,7 @@ struct nand_device {
 	unsigned long long size;
 	unsigned int nb_planes;
 	unsigned int buswidth;
+	uint8_t manufacturer_id;
 	struct ecc ecc;
 	int (*mtd_block_is_bad)(unsigned int block);
 	int (*mtd_read_page)(struct nand_device *nand, unsigned int page,

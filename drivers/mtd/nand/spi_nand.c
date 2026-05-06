@@ -91,6 +91,10 @@ static int spi_nand_quad_enable(uint8_t manufacturer_id)
 {
 	bool enable = false;
 
+	if (manufacturer_id == FORESEE_ID) {
+		return 0;
+	}
+
 	if ((spinand_dev.flags & SPI_NAND_HAS_QE_BIT) == 0U) {
 		return 0;
 	}
@@ -304,17 +308,19 @@ int spi_nand_init(unsigned long long *size, unsigned int *erase_size)
 		return ret;
 	}
 
+	spinand_dev.nand_dev->manufacturer_id = id[1];
+
 	ret = spi_nand_read_reg(SPI_NAND_REG_CFG, &spinand_dev.cfg_cache);
 	if (ret != 0) {
 		return ret;
 	}
 
-	ret = spi_nand_quad_enable(id[1]);
+	ret = spi_nand_quad_enable(spinand_dev.nand_dev->manufacturer_id);
 	if (ret != 0) {
 		return ret;
 	}
 
-	VERBOSE("SPI_NAND Detected ID 0x%x\n", id[1]);
+	VERBOSE("SPI_NAND Detected ID 0x%x\n", spinand_dev.nand_dev->manufacturer_id);
 
 	VERBOSE("Page size %u, Block size %u, size %llu\n",
 		spinand_dev.nand_dev->page_size,

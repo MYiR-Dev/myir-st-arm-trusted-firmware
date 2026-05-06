@@ -29,6 +29,8 @@
 #define SPI_NAND_STATUS_BUSY		BIT(0)
 #define SPI_NAND_STATUS_ECC_UNCOR	BIT(5)
 
+#define FORESEE_ID			0xCDU
+
 /* Flags for specific configuration */
 #define SPI_NAND_HAS_QE_BIT		BIT(0)
 
