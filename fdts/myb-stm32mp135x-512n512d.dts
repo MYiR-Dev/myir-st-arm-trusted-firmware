@@ -10,7 +10,7 @@
 #include "stm32mp13-ddr3-1x4Gb-1066-binF.dtsi"
 
 / {
-	model = "STMicroelectronics STM32MP135F-DK Discovery Board";
+	model = "MYD-YF135X 512N512D  Board";
 	compatible = "st,stm32mp135f-dk", "st,stm32mp135";
 
 	aliases {

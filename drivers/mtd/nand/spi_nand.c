@@ -91,9 +91,6 @@ static int spi_nand_quad_enable(uint8_t manufacturer_id)
 {
 	bool enable = false;
 
-	if (manufacturer_id == FORESEE_ID) {
-		return 0;
-	}
 
 	if ((spinand_dev.flags & SPI_NAND_HAS_QE_BIT) == 0U) {
 		return 0;
