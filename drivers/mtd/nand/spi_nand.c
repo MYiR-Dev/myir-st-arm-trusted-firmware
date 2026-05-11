@@ -91,9 +91,10 @@ static int spi_nand_quad_enable(uint8_t manufacturer_id)
 {
 	bool enable = false;
 
-
-	if ((spinand_dev.flags & SPI_NAND_HAS_QE_BIT) == 0U) {
-		return 0;
+	if (manufacturer_id != FORESEE_ID) {
+		if ((spinand_dev.flags & SPI_NAND_HAS_QE_BIT) == 0U) {
+				return 0;
+		}
 	}
 
 	if (spinand_dev.spi_read_cache_op.data.buswidth ==
@@ -287,14 +288,6 @@ int spi_nand_init(unsigned long long *size, unsigned int *erase_size)
 	spinand_dev.spi_read_cache_op.dummy.buswidth = SPI_MEM_BUSWIDTH_1_LINE;
 	spinand_dev.spi_read_cache_op.data.buswidth = SPI_MEM_BUSWIDTH_1_LINE;
 
-	if (plat_get_spi_nand_data(&spinand_dev) != 0) {
-		return -EINVAL;
-	}
-
-	assert((spinand_dev.nand_dev->page_size != 0U) &&
-	       (spinand_dev.nand_dev->block_size != 0U) &&
-	       (spinand_dev.nand_dev->size != 0U));
-
 	ret = spi_nand_reset();
 	if (ret != 0) {
 		return ret;
@@ -306,6 +299,14 @@ int spi_nand_init(unsigned long long *size, unsigned int *erase_size)
 	}
 
 	spinand_dev.nand_dev->manufacturer_id = id[1];
+
+	if (plat_get_spi_nand_data(&spinand_dev) != 0) {
+		return -EINVAL;
+	}
+
+	assert((spinand_dev.nand_dev->page_size != 0U) &&
+	       (spinand_dev.nand_dev->block_size != 0U) &&
+	       (spinand_dev.nand_dev->size != 0U));
 
 	ret = spi_nand_read_reg(SPI_NAND_REG_CFG, &spinand_dev.cfg_cache);
 	if (ret != 0) {

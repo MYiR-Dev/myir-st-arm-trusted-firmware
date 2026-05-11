@@ -32,6 +32,7 @@ static int get_data_from_otp(struct nand_device *nand_dev, bool is_slc)
 	uint32_t nand_param;
 	uint32_t nand2_param __maybe_unused;
 
+
 	if (nand_dev->manufacturer_id != FORESEE_ID) {
 		nand_dev->page_size = 0x800;
 		nand_dev->block_size = 64U*nand_dev->page_size;
@@ -39,7 +40,6 @@ static int get_data_from_otp(struct nand_device *nand_dev, bool is_slc)
 		nand_dev->size = 2*1024*nand_dev->block_size;
 		return 0;
 	}
-
 	/* Check if NAND parameters are stored in OTP */
 	if (stm32_get_otp_value(NAND_OTP, &nand_param) != 0) {
 		ERROR("BSEC: NAND_OTP Error\n");
